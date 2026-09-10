@@ -1,6 +1,6 @@
 ## 1. Copy the library
 
-- [ ] 1.1 Copy `factory-components/` (std: `session-config`, `predicate`, `gh`, `daemon`; components: `openspec`, `pr-review-loop`; all READMEs) from the ptah `main` snapshot at `6307bd5` into this repo root, and verify with `diff -r` against the snapshot that the copy is byte-identical (no renames, no require-path changes)
+- [ ] 1.1 Obtain the snapshot: `git clone https://github.com/patextreme/ptah.git` to a scratch dir outside this repo, then `git -C <clone> checkout 6307bd5` (pinned commit — `main` may advance past it). Copy its entire `factory-components/` tree (std: `session-config`, `predicate`, `gh`, `daemon`; components: `openspec`, `pr-review-loop`; all READMEs and supporting files such as `pr-review-loop/default-instruction.luau`) into this repo root, and verify with `diff -r` against the snapshot that the copy is byte-identical (no renames, no require-path changes)
 
 ## 2. Package shape
 

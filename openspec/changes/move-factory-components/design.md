@@ -1,7 +1,8 @@
 ## Context
 
-The library exists today only in the ptah repository at `main` snapshot
-`6307bd5` (stdlib `session-config`, `predicate`, `gh`, `daemon`; components
+The library exists today only in the ptah repository
+(`https://github.com/patextreme/ptah.git`) at `main` snapshot `6307bd5`
+(stdlib `session-config`, `predicate`, `gh`, `daemon`; components
 `openspec`, `pr-review-loop`), distributed as a manually mounted source tree
 (the archived `factory-components` change's decision: source mount, no
 registry, no lockfile). This repository is an empty skeleton: openspec
