@@ -1,0 +1,15 @@
+# Project-local Helix config: load the ptah script API type definitions.
+#
+# `.ptah/ptah.d.luau` is generated/refreshed with:
+#   ptah types > .ptah/ptah.d.luau
+#
+# luau-lsp resolves the path relative to its working directory, which is
+# the Helix workspace root (this repo), so open Helix from the repo root.
+
+[language-server.luau-lsp]
+command = "luau-lsp"
+args = ["lsp", "--definitions=.ptah/ptah.d.luau"]
+
+[[language]]
+name = "luau"
+language-servers = ["luau-lsp"]
