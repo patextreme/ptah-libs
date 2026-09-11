@@ -14,9 +14,9 @@ The library SHALL be packaged as a pesde package (`patextreme/ptah_libs`,
 `luau` target) consumable as a **git dependency pinned to a tag** of this
 repository — never published to a registry — and SHALL expose exactly one
 library entry whose exports are the named camelCase surface:
-`std` (with `predicate`, `gh`, `daemon`, `sessionConfig`), `openspec`, and
-`prReviewLoop`. Deep-path requires into the library tree SHALL NOT be part
-of the supported consumer surface.
+`std` (with `predicate`, `gh`, `daemon`, `sessionConfig`, and `escalate`),
+`openspec`, and `prReviewLoop`. Deep-path requires into the library tree
+SHALL NOT be part of the supported consumer surface.
 
 #### Scenario: Consumer installs as a git dependency
 
@@ -26,7 +26,7 @@ of the supported consumer surface.
 #### Scenario: Entry exports the library surface
 
 - **WHEN** a consumer requires the generated dependency shim
-- **THEN** `std.predicate`, `std.gh`, `std.daemon`, `std.sessionConfig`, `openspec`, and `prReviewLoop` are available on the returned table
+- **THEN** `std.predicate`, `std.gh`, `std.daemon`, `std.sessionConfig`, `std.escalate`, `openspec`, and `prReviewLoop` are available on the returned table
 
 ### Requirement: Session config application
 
@@ -183,6 +183,43 @@ config.
 - **WHEN** a component runs from a read-only install (e.g. the nix store)
 - **THEN** the workflow completes without attempting to write inside the library tree
 
+### Requirement: Escalation mechanism
+
+The library SHALL provide a best-effort escalation mechanism (`std.escalate`)
+that routes a blocker to a human through ptah's ask facility when one is
+available and reports the outcome as data. The mechanism SHALL expose one
+operation taking a required prompt line and optional details, and SHALL
+return a status-discriminated outcome: `respond` carrying the human's
+answer text unprocessed, `abort` when the human refused the ask, or
+`unavailable` carrying the underlying reason when no ask provider could
+serve the request (prohibited, unconfigured, provider failure, or end of
+input). The mechanism SHALL invoke ptah's ask through an aliased reference
+rather than a literal call site, so that a library-level ask never becomes
+a pre-flight finding that blocks a consumer's `ptah check` or `ptah run`
+in an environment without an ask provider. The mechanism SHALL accept no
+configuration: ask-provider selection remains the operator's decision,
+made outside script code.
+
+#### Scenario: Human answer is returned as data
+
+- **WHEN** the escalation operation is invoked where an ask provider serves the request and the human answers
+- **THEN** the outcome is `respond` carrying the answer text verbatim
+
+#### Scenario: Human refusal is returned as data
+
+- **WHEN** the escalation operation is invoked where an ask provider serves the request and the human aborts the ask
+- **THEN** the outcome is `abort` carrying no answer text
+
+#### Scenario: Unservable ask degrades to an unavailable outcome
+
+- **WHEN** the escalation operation is invoked where no ask provider serves the request — asking is prohibited, no provider is configured, the provider fails, or the input closes without an answer
+- **THEN** the outcome is `unavailable` carrying the provider's reason, and no error propagates from the ask itself
+
+#### Scenario: Consumer checks are unaffected by the library's ask
+
+- **WHEN** a consumer shim requires the library and runs `ptah check` or `ptah run` pre-flight in an environment with no ask provider configured
+- **THEN** no ask-related finding is reported for the library's escalation mechanism
+
 ### Requirement: openspec component
 
 The library SHALL provide an openspec component whose instance exposes
@@ -192,9 +229,25 @@ verify converges verification then syncs and archives the change. The
 component SHALL declare its environment requirements (an agent carrying the
 openspec skills, `openspec` on PATH) in its documentation rather than
 bundling or installing them. Convergence is the component's own loop over
-the library's typed judge: a judge-rejected pass probes for human input,
-a needed human fails the operation without issuing a fix, and exhausting
-the iteration cap fails the operation with an error reporting the cap.
+the library's typed judge: a judge-rejected pass probes for human input;
+a confirmed need for human input escalates through the library's escalation
+mechanism — a served ask resumes the loop with the human's answer, and an
+unservable or refused ask fails the operation without issuing a fix — and
+exhausting the iteration cap fails the operation with an error reporting
+the cap.
+
+On a confirmed need for human input, the component SHALL ask through the
+library's escalation mechanism with an ask whose prompt line identifies
+the operation, the change, and the iteration state, and whose details
+carry the work session's label and the full probe text. When the ask is
+answered, the answer text SHALL be sent verbatim as the next prompt of
+the still-open work session (no header or framing added), the iteration
+SHALL count against the cap, and the loop SHALL continue toward
+convergence. When the human aborts the ask, the operation SHALL fail with
+a distinct error stating the human aborted the escalation. When no ask
+provider serves the request, the operation SHALL fail with an error
+stating human input is needed — the same wording as before the ask
+existed.
 
 The component's config SHALL accept `sessionConfig`, an ordered
 session-config entry array applied to every work session the component
@@ -213,7 +266,8 @@ whole change. The scope SHALL be carried to the judge so the verdict is
 made against the scoped completion, without the judge needing the work
 prompt. A scope that matches no tasks SHALL end the pass with a stated
 dead-end rather than the agent substituting a different subset, and the
-existing human-escalation path SHALL surface it as an operation error.
+escalation path SHALL surface it (an ask when a provider serves it; an
+operation error otherwise).
 groom and verify SHALL remain whole-change operations.
 
 #### Scenario: Verify converges and archives
@@ -229,7 +283,27 @@ groom and verify SHALL remain whole-change operations.
 #### Scenario: Human escalation
 
 - **WHEN** a groom pass is judge-rejected and the escalation judge confirms human input is required
-- **THEN** the operation fails with an error stating human input is needed, and no fix prompt is issued
+- **THEN** the need escalates through the library's escalation mechanism — an answered ask resumes the loop with the human's answer; an aborted or unservable ask fails the operation with an error stating human input is needed, and no fix prompt is issued
+
+#### Scenario: Human escalation asks and resumes
+
+- **WHEN** a groom pass is judge-rejected, the escalation judge confirms human input is required, an ask provider serves the request, and the human answers
+- **THEN** the answer is sent verbatim as the next prompt of the still-open work session, the iteration counts against the cap, and the loop continues toward convergence
+
+#### Scenario: Human escalation abort fails
+
+- **WHEN** a groom pass is judge-rejected, the escalation judge confirms human input is required, an ask provider serves the request, and the human aborts the ask
+- **THEN** the operation fails with a distinct error stating the human aborted the escalation, and no fix prompt is issued
+
+#### Scenario: Unservable ask fails as before
+
+- **WHEN** a groom pass is judge-rejected, the escalation judge confirms human input is required, and no ask provider serves the request
+- **THEN** the operation fails with an error stating human input is needed — the same wording as before the ask existed — and no fix prompt is issued
+
+#### Scenario: Ask carries identity, session label, and full probe text
+
+- **WHEN** the component raises an escalation ask
+- **THEN** the prompt line identifies the operation, the change, and the iteration state, and the details carry the work session's label and the full probe text without truncation
 
 #### Scenario: Iteration cap
 
@@ -249,7 +323,7 @@ groom and verify SHALL remain whole-change operations.
 #### Scenario: Unresolvable scope dead-ends
 
 - **WHEN** implement runs with a task scope that matches no tasks of the change
-- **THEN** the agent ends the pass stating that the scope matches no tasks without implementing a substitute subset, and the operation fails through the human-escalation path
+- **THEN** the agent ends the pass stating that the scope matches no tasks without implementing a substitute subset, and the dead-end surfaces through the escalation path (an ask when a provider serves it; the operation fails otherwise)
 
 #### Scenario: Work sessions receive session config
 
@@ -274,6 +348,21 @@ settings (agent prompts, reviewer instruction text, dry-run gating)
 expressed as config rather than code. The target repository SHALL NOT be
 component config: it arrives per call inside the PR URL.
 
+On a confirmed need for human input (the escalation judge confirms the
+blocking findings need a human), the loop SHALL ask through the library's
+escalation mechanism with an ask whose prompt line identifies the loop and
+the PR URL and the iteration state, and whose details carry the work
+session's label and the full probe text. When the ask is answered, the
+answer text SHALL be sent verbatim as the next prompt of the still-open
+work session (no header or framing added), the commit-and-push step SHALL
+still follow the human-guided fix (gated by dry-run as any fix), the
+iteration SHALL count against the cap, and the loop SHALL continue toward
+convergence. When the human aborts the ask, the operation SHALL fail with
+a distinct error stating the human aborted the escalation. When no ask
+provider serves the request, the operation SHALL fail with an error
+stating human input is needed to resolve the findings — the same wording
+as before the ask existed.
+
 The component's config SHALL accept `sessionConfig`, an ordered
 session-config entry array applied to every work session the component
 creates (each review/fix iteration's session, which also posts the verdict
@@ -286,6 +375,26 @@ entry, and the entry order is the consumer's `setConfig` order.
 
 - **WHEN** the reviewer reports findings judged resolvable without a human
 - **THEN** the component drives a fix session and pushes, iterating until the review passes or escalation occurs
+
+#### Scenario: Human escalation asks and resumes
+
+- **WHEN** the reviewer's blocking findings are judged to need human input, an ask provider serves the request, and the human answers
+- **THEN** the answer is sent verbatim as the next prompt of the still-open work session, the commit-and-push step follows the human-guided fix (gated by dry-run as any fix), the iteration counts against the cap, and the loop continues toward convergence
+
+#### Scenario: Human escalation abort fails
+
+- **WHEN** the reviewer's blocking findings are judged to need human input, an ask provider serves the request, and the human aborts the ask
+- **THEN** the operation fails with a distinct error stating the human aborted the escalation, and no fix is issued
+
+#### Scenario: Unservable ask fails as before
+
+- **WHEN** the reviewer's blocking findings are judged to need human input and no ask provider serves the request
+- **THEN** the operation fails with an error stating human input is needed to resolve the findings — the same wording as before the ask existed — and no fix is issued
+
+#### Scenario: Ask carries identity, session label, and full probe text
+
+- **WHEN** the loop raises an escalation ask
+- **THEN** the prompt line identifies the loop, the PR URL, and the iteration state, and the details carry the work session's label and the full probe text without truncation
 
 #### Scenario: Repository context is per-call
 
