@@ -9,3 +9,5 @@ repo. See `../README.md` for the library contract and consumption model.
 - `predicate.luau` — typed boolean judge
 - `gh.luau` — GitHub CLI transport (`ptah.exec` + structured outcomes)
 - `daemon.luau` — per-repo loop skeleton with error isolation
+- `escalate.luau` — best-effort escalation transport over ptah's ask
+  facility (outcomes as data; no ask ever raises)

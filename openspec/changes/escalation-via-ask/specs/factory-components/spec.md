@@ -119,6 +119,11 @@ operations.
 - **WHEN** the component's documentation is consulted for its environment requirements
 - **THEN** the agent-skill and CLI requirements are listed so a consumer can verify them before running
 
+#### Scenario: Human escalation
+
+- **WHEN** a groom pass is judge-rejected and the escalation judge confirms human input is required
+- **THEN** the need escalates through the library's escalation mechanism — an answered ask resumes the loop with the human's answer; an aborted or unservable ask fails the operation with an error stating human input is needed, and no fix prompt is issued
+
 #### Scenario: Human escalation asks and resumes
 
 - **WHEN** a groom pass is judge-rejected, the escalation judge confirms human input is required, an ask provider serves the request, and the human answers
