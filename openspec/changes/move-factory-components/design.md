@@ -121,6 +121,11 @@ accepted drift, bounded by adoption.
   `luau_packages/<alias>.luau` shim into `.pesde/…` is unverified] → Same:
   revisit at first tag; the `lib.luau` naming mitigates the known quirk
   class.
+- [The offline test suite the coverage requirement delegates to ptah does
+  not exist there at snapshot `6307bd5` (no mock agent, no library
+  tests)] → Accepted; the requirement is a contract that coverage exists,
+  and ptah builds it. Gate: cut no tag until the suite lands upstream;
+  also stated in the README's versioning section.
 - [Coexistence drift: two copies of the tree exist until ptah adopts] →
   ptah's copy is frozen by policy and ptah's own archived change remains
   the record of what it froze; all library work lands here only.
