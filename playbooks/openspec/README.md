@@ -121,6 +121,6 @@ tasks) surfaces through this same path: an ask when a provider
 serves it, the operation error otherwise.
 
 Asks display the work session's ptah label (what the run's rendered
-stream is keyed by); showing the agent-side ACP session id is
-deferred pending
-[patextreme/ptah#20](https://github.com/patextreme/ptah/issues/20).
+stream is keyed by) and the agent-side ACP session id
+(`session:sessionId()`) — the id the agent's own tooling can resume or
+list — so a human can correlate the ask with the session.

@@ -74,7 +74,7 @@ conventions](#loop-conventions), and [Session config](#session-config) below.
 
   | ptah_libs | Minimum ptah |
   | --- | --- |
-  | 0.1.0 | unreleased ptah main at snapshot `6307bd5` (session-config support; no ptah release published yet) |
+  | 0.1.0 | ptah 0.1.0 (session-config support and `session:sessionId()`) |
 
 - **Offline test coverage lives upstream — and is pending.** The library's
   offline suite (mock agent, no network, no real agent) is maintained in the
@@ -212,9 +212,9 @@ config:
   forgotten terminal parks the run).
 
 Asks display the work session's ptah label (what the run's rendered
-stream is keyed by); showing the agent-side ACP session id inside
-the ask is deferred pending
-[patextreme/ptah#20](https://github.com/patextreme/ptah/issues/20).
+stream is keyed by) and the agent-side ACP session id
+(`session:sessionId()`) — the id the agent's own tooling can resume or
+list — so a human can correlate the ask with the session.
 
 ## Session config
 

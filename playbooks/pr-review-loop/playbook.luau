@@ -720,10 +720,11 @@ function M.new(config: Config): Instance
 				if anyNeedsHuman(findings) then
 					-- The ask's prompt line identifies the loop, the PR URL, and
 					-- the iteration state; the details carry the work session's
-					-- label and the full review prose, untruncated.
+					-- label, the agent-side ACP session id, and the full review prose,
+					-- untruncated.
 					local answer = escalate.ask({
 						prompt = `pr-review {prUrl}: human input required (iteration {iteration + 1} of {maxIterations})`,
-						details = `work session: {session:label()}\n\n{verdict}`,
+						details = `work session: {session:label()}\nagent session: {session:sessionId()}\n\n{verdict}`,
 					})
 					if answer.status == "respond" then
 						-- The answer is the session's next prompt, verbatim —

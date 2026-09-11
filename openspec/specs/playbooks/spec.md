@@ -299,10 +299,10 @@ groom and verify SHALL remain whole-change operations.
 - **WHEN** a groom pass is judge-rejected, the escalation judge confirms human input is required, and no ask provider serves the request
 - **THEN** the operation fails with an error stating human input is needed — the same wording as before the ask existed — and no fix prompt is issued
 
-#### Scenario: Ask carries identity, session label, and full probe text
+#### Scenario: Ask carries identity, session label, ACP session id, and full probe text
 
 - **WHEN** the playbook raises an escalation ask
-- **THEN** the prompt line identifies the operation, the change, and the iteration state, and the details carry the work session's label and the full probe text without truncation
+- **THEN** the prompt line identifies the operation, the change, and the iteration state, and the details carry the work session's label, the agent-side ACP session id, and the full probe text without truncation
 
 #### Scenario: Iteration cap
 
@@ -473,10 +473,10 @@ continues the loop toward convergence, so the returned status is always
 - **WHEN** the judge flags `needsHuman` and no ask provider serves the request
 - **THEN** the operation fails with an error stating human input is needed to resolve the findings — the same wording as before the ask existed — and no fix is issued
 
-#### Scenario: Ask carries identity, session label, and full probe text
+#### Scenario: Ask carries identity, session label, ACP session id, and full probe text
 
 - **WHEN** the loop raises an escalation ask
-- **THEN** the prompt line identifies the loop, the PR URL, and the iteration state, and the details carry the work session's label and the full review prose (the probe payload in this design) without truncation
+- **THEN** the prompt line identifies the loop, the PR URL, and the iteration state, and the details carry the work session's label, the agent-side ACP session id, and the full review prose (the probe payload in this design) without truncation
 
 #### Scenario: Repository context is per-call
 

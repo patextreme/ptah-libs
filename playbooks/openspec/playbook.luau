@@ -103,7 +103,7 @@ function M.new(config: Config): Instance
 			if needsHuman then
 				local answer = escalate.ask({
 					prompt = `{sessionId} {opts.change}: human input required (iteration {iteration + 1} of {maxIterations})`,
-					details = `work session: {session:label()}\n\n{probe.text}`,
+					details = `work session: {session:label()}\nagent session: {session:sessionId()}\n\n{probe.text}`,
 				})
 				if answer.status == "respond" then
 					-- The answer is the session's next prompt, verbatim —
