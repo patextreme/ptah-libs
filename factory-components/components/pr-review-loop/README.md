@@ -114,9 +114,13 @@ field (the migration note in the library README shows the entry form).
 
 ## Operations
 
-- `loop:review(prUrl)` — run the loop against one pull request; the PR
-  URL is per-call data and the sole repository context. Returns the
-  final accepted review verdict text.
+- `loop:review(prUrl)` — run the loop against one pull request; the
+  PR URL is per-call data and the sole repository context. Returns the
+  final accepted review verdict text. A judge-confirmed need for human
+  input escalates — ask-and-resume when a provider serves it (the
+  answer drives the fix, push follows as any fix), the operation
+  error otherwise — see
+  [Escalation](#escalation-ask-when-served-fail-otherwise) below.
 
 With `dryRun = true` the commit-and-push step is skipped entirely: the
 loop still reviews, judges, and fixes, but never pushes to the PR
@@ -128,3 +132,39 @@ The component ships facade-only (`:review`). A `run()` daemon
 convenience (looping over open PRs) was deliberately deferred: it is
 sugar over `std.daemon` + `:review` and can be added without breaking
 the facade.
+
+## Escalation (ask when served, fail otherwise)
+
+When the escalation judge confirms the blocking findings need a
+human, the loop escalates through the stdlib's `escalate` transport:
+it pauses on an ask — the work session stays open — whose prompt
+line identifies the loop, the PR URL, and the iteration state
+(`pr-review https://github.com/o/r/pull/42: human input required
+(iteration 2 of 15)`) and whose details carry the work session's
+label and the **full** probe text, untruncated, so the human can
+answer. Three outcomes:
+
+- **respond** — the answer is sent verbatim as the next prompt of the
+  still-open work session (no header, no framing: the human is
+  driving the agent), and the commit-and-push step follows the
+  human-guided fix exactly as it follows any fix (gated by `dryRun`).
+  The iteration counts against the cap and the loop continues toward
+  convergence.
+- **abort** (the human refused the ask) — the operation fails with
+  `pr-review: human aborted escalation (iteration N of M)` and no
+  fix is issued.
+- **unavailable** (no ask provider served the request: prohibited,
+  unconfigured, provider failure, or end of input) — the operation
+  fails with the same wording as before asks existed: `pr-review:
+  human input is required to resolve the findings (iteration N of
+  M)`.
+
+Whether an ask is served is the operator's provider selection
+(`--ask` > `PTAH_ASK` > `[ask]` > TTY auto-detect), never component
+config — a provider-less environment keeps the pre-ask failure
+behavior exactly.
+
+Asks display the work session's ptah label (what the run's rendered
+stream is keyed by); showing the agent-side ACP session id is
+deferred pending
+[patextreme/ptah#20](https://github.com/patextreme/ptah/issues/20).

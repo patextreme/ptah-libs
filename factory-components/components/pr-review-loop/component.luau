@@ -12,6 +12,7 @@
 
 local predicate = require("../../std/predicate")
 local sessionConfig = require("../../std/session-config")
+local escalate = require("../../std/escalate")
 local defaultInstruction = require("./default-instruction")
 
 export type Config = {
@@ -101,8 +102,10 @@ function M.new(config: Config): Instance
 				end
 
 				-- Escalation probes the blocking findings with a subagent
-				-- before asking for a human; if a human is needed the
-				-- loop fails without issuing the fix.
+				-- before asking for a human. A confirmed need routes through
+				-- std/escalate: the ask pauses only this loop — the work
+				-- session stays open — and the outcome decides between
+				-- resume and fail.
 				local probe = session:prompt(
 					header
 						.. "For each of the blocking issues, validate with a subagent whether the issue is real. For the blocking issues that remain, do you know how to resolve them, or do you need human input?"
@@ -113,10 +116,33 @@ function M.new(config: Config): Instance
 					sessionConfig = config.judgeSessionConfig,
 				})
 				if needsHuman then
-					session:close()
-					error(
-						`pr-review: human input is required to resolve the findings (iteration {iteration + 1} of {maxIterations})`
-					)
+					local answer = escalate.ask({
+						prompt = `pr-review {prUrl}: human input required (iteration {iteration + 1} of {maxIterations})`,
+						details = `work session: {session:label()}\n\n{probe.text}`,
+					})
+					if answer.status == "respond" then
+						-- The answer is the session's next prompt, verbatim —
+						-- no header, no framing: the human is driving the agent.
+						-- The human-guided fix gets the same commit-and-push
+						-- step as any fix (gated by dry-run), the iteration
+						-- counts against the cap, and the loop re-judges.
+						session:prompt(answer.text)
+						if push ~= nil then
+							session:prompt(header .. push)
+						end
+						session:close()
+						continue
+					elseif answer.status == "abort" then
+						session:close()
+						error(`pr-review: human aborted escalation (iteration {iteration + 1} of {maxIterations})`)
+					else
+						-- No ask provider served the request: today's
+						-- failure, byte-identical.
+						session:close()
+						error(
+							`pr-review: human input is required to resolve the findings (iteration {iteration + 1} of {maxIterations})`
+						)
+					end
 				end
 
 				local fix = session:prompt(header .. "Go ahead and resolve the blocking issues")

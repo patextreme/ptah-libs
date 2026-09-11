@@ -25,8 +25,17 @@ _Avoid_: template, plugin, module (module means any Luau file)
 **Convergence loop**:
 The core workflow pattern: prompt an agent, judge the result with a typed
 predicate, and repeat with fixes until the predicate holds or the loop
-escalates to a human.
+escalates — a served human answer resumes the loop; an unservable or
+refused escalation ends it.
 _Avoid_: review loop, retry loop (those name specific uses of the pattern)
+
+**Escalation**:
+The routing decision a convergence loop makes when a judged pass cannot
+proceed without a human. Two realizations: an ask — pause, surface the
+blocker, resume with the human's answer — when a human channel serves
+it; a hard fail otherwise.
+_Avoid_: abort (that names the human refusing an ask, not the routing),
+fallback (escalation is a routing decision, not a degradation)
 
 **Shim**:
 The thin consumer-owned entry script that requires the package and hands it

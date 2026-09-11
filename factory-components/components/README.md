@@ -14,3 +14,9 @@ module's internal `../../std/…` requires identically. See
 
 - `openspec/` — groom, implement, verify an openspec change
 - `pr-review-loop/` — review→fix→push convergence on a pull request
+
+Both convergence-loop components escalate to a human through the
+stdlib's `escalate` transport when a judged pass cannot proceed — an
+answered ask resumes the loop, a refused or unservable ask fails the
+operation (see `../README.md` for the loop conventions and each
+component's README for its escalation behavior).

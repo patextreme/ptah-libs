@@ -8,6 +8,7 @@
 
 local predicate = require("../../std/predicate")
 local sessionConfig = require("../../std/session-config")
+local escalate = require("../../std/escalate")
 
 export type Config = {
 	-- Work agent handle driving the openspec skills.
@@ -57,11 +58,15 @@ function M.new(config: Config): Instance
 	-- The probe/human/resolve texts are per-operation data: each
 	-- operation speaks its own terminal vocabulary (findings for
 	-- groom/verify, the apply skill's pause states for implement) over
-	-- the same skeleton.
+	-- the same skeleton. Escalation composes the ask's identity line
+	-- from the same data (`{sessionId} {change}`) and routes through
+	-- std/escalate: a served ask resumes the loop, abort/unavailable
+	-- fail the operation.
 	local function drive(
 		sessionId: string,
 		prompt: string,
 		opts: {
+			change: string,
 			accepted: string,
 			probePrompt: string,
 			humanPredicate: string,
@@ -86,7 +91,9 @@ function M.new(config: Config): Instance
 			end
 
 			-- A judge-rejected pass probes for human input before any
-			-- fix: if a human is needed the operation fails here.
+			-- fix. A confirmed need escalates through std/escalate: the
+			-- ask pauses only this loop — the work session stays open —
+			-- and the outcome decides between resume and fail.
 			local probe = session:prompt(header .. opts.probePrompt)
 			local needsHuman = predicate(opts.humanPredicate, probe.text, {
 				agent = config.judgeAgent,
@@ -94,9 +101,31 @@ function M.new(config: Config): Instance
 				sessionConfig = config.judgeSessionConfig,
 			})
 			if needsHuman then
-				session:close()
-				local excerpt = string.gsub(string.sub(probe.text, 1, 200), "[\r\n]", " ")
-				error(`{sessionId}: human input is required (iteration {iteration + 1} of {maxIterations}): {excerpt}`)
+				local answer = escalate.ask({
+					prompt = `{sessionId} {opts.change}: human input required (iteration {iteration + 1} of {maxIterations})`,
+					details = `work session: {session:label()}\n\n{probe.text}`,
+				})
+				if answer.status == "respond" then
+					-- The answer is the session's next prompt, verbatim —
+					-- no header, no framing: the human is driving the agent.
+					-- The iteration then ends like any other, counted
+					-- against the cap, and the loop re-judges the result of
+					-- the human-guided pass.
+					session:prompt(answer.text)
+					session:close()
+					continue
+				elseif answer.status == "abort" then
+					session:close()
+					error(`{sessionId}: human aborted escalation (iteration {iteration + 1} of {maxIterations})`)
+				else
+					-- No ask provider served the request: today's
+					-- failure, byte-identical.
+					session:close()
+					local excerpt = string.gsub(string.sub(probe.text, 1, 200), "[\r\n]", " ")
+					error(
+						`{sessionId}: human input is required (iteration {iteration + 1} of {maxIterations}): {excerpt}`
+					)
+				end
 			end
 
 			session:prompt(header .. opts.resolvePrompt)
@@ -110,6 +139,7 @@ function M.new(config: Config): Instance
 			ptah.log(`openspec: reviewing change {change}`)
 			local text =
 				drive("openspec-groom", `Review the openspec change named {change} using the openspec-review skill`, {
+					change = change,
 					accepted = "The review does not contain any blocker findings",
 					probePrompt = "For the blocking findings, do you know how to resolve them, or do you need human input?",
 					humanPredicate = "Human input is required to resolve the blocking findings",
@@ -140,6 +170,7 @@ function M.new(config: Config): Instance
 				accepted = "All tasks of the change are implemented"
 			end
 			local text = drive("openspec-implement", prompt, {
+				change = change,
 				accepted = accepted,
 				probePrompt = "For the pause: can you resolve it yourself (for example by updating the change's artifacts per the apply skill), or does it require human input to continue?",
 				humanPredicate = "The pause requires human input to continue",
@@ -154,6 +185,7 @@ function M.new(config: Config): Instance
 				"openspec-verify",
 				`Verify the implementation of the openspec change named {change} using the openspec-verify-change skill`,
 				{
+					change = change,
 					accepted = "The verification does not contain critical findings or warnings",
 					probePrompt = "For the critical findings and warnings, do you know how to resolve them, or do you need human input?",
 					humanPredicate = "Human input is required to resolve the critical findings and warnings",

@@ -22,6 +22,11 @@ distribution decision and `CONTEXT.md` for the vocabulary.
     quoting.
   - `daemon.luau` — repo loop skeleton: apply a per-repo operation with
     per-repo error isolation, sequential or bounded-concurrency parallel.
+  - `escalate.luau` — best-effort escalation transport over ptah's ask
+    facility: one `ask({ prompt, details? })`, returning `respond`
+    (the human's answer), `abort` (the human refused), or
+    `unavailable` (the provider's reason) as data — no ask ever
+    raises, and no provider needs to be configured.
 - `components/<name>/` — one directory per component: `component.luau`
   is the facade module exposing `new(config) -> instance`, and the
   sibling `README.md` declares the component's environment
@@ -46,9 +51,44 @@ loops share these conventions, documented here so drift stays visible:
   `<prefix>-human:<n>`.
 - Every prompt of a loop is prefixed `[<prefix> iteration N of M]` so
   the agent (and the logs) can see the loop state.
-- Failure wording: `<prefix>: human input is required to resolve the
-  findings (iteration N of M)` and `<prefix>: did not converge within M
-  iterations`.
+- Escalation is two-mode: **ask when a provider serves the request,
+  hard fail when none does.** A confirmed need for human input routes
+  through `std/escalate` — the work session stays open across the
+  ask, and a human answer is sent back into it verbatim (no header,
+  no framing: the human is driving the agent), the iteration counting
+  against the cap like any other. The ask's prompt line identifies
+  the operation, the per-call identity, and the iteration state
+  (`<prefix> <change or PR URL>: human input required (iteration N of
+  M)`); its details carry the work session's label and the **full**
+  probe text, untruncated — the human must be able to answer.
+- Failure wording: the human refused the ask — `<prefix>: human
+  aborted escalation (iteration N of M)`; no provider served the ask —
+  each component's pre-ask wording, byte-identical (e.g. `pr-review:
+  human input is required to resolve the findings (iteration N of
+  M)`), so provider-less consumers see zero drift; the cap —
+  `<prefix>: did not converge within M iterations`.
+
+### Ask behavior notes
+
+Escalation rides ptah's ask facility, so its behaviors apply. The
+provider is the operator's selection — `--ask` > `PTAH_ASK` > project
+`[ask]` > user `[ask]` > TTY auto-detect — never script or component
+config:
+
+- Concurrent asks serialize FIFO, attributed `ask {n} {script}` —
+  the ask's identity line is what disambiguates fan-out runs.
+- A pending ask keeps the run alive like an outstanding task.
+- `--quiet` hides the session stream, but asks always render — and an
+  ask carries the full probe text, so it stays self-contained even
+  when the stream its session label points at is suppressed.
+- There is no ask timeout: an ask blocks until answered, aborted, or
+  the run is cancelled (Ctrl-C is run cancellation, exit 130/143 — a
+  forgotten terminal parks the run).
+
+Asks display the work session's ptah label (what the run's rendered
+stream is keyed by); showing the agent-side ACP session id inside
+the ask is deferred pending
+[patextreme/ptah#20](https://github.com/patextreme/ptah/issues/20).
 
 ## Session config
 

@@ -11,6 +11,7 @@ local predicate = require("./factory-components/std/predicate")
 local gh = require("./factory-components/std/gh")
 local daemon = require("./factory-components/std/daemon")
 local sessionConfig = require("./factory-components/std/session-config")
+local escalate = require("./factory-components/std/escalate")
 local openspec = require("./factory-components/components/openspec/component")
 local prReviewLoop = require("./factory-components/components/pr-review-loop/component")
 
@@ -20,6 +21,7 @@ return {
 		gh = gh,
 		daemon = daemon,
 		sessionConfig = sessionConfig,
+		escalate = escalate,
 	},
 	openspec = openspec,
 	prReviewLoop = prReviewLoop,

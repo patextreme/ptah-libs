@@ -61,14 +61,17 @@ Per-call data is a method argument:
 
 - `ops:groom(change)` — converge the change's proposal through review
   (`openspec-review`); exits when the review carries no blocker
-  findings, escalating to a human or the cap otherwise.
+  findings, escalating to a human (see
+  [Escalation](#escalation-ask-when-served-fail-otherwise)) or the
+  cap otherwise.
 - `ops:implement(change)` — drive task execution
   (`openspec-apply-change`) until all tasks of the change are
   implemented. Each pass ends either complete or paused with a stated
   reason, as the skill defines those states: a pause the agent can
   resolve itself (e.g. updating the change's artifacts) is resolved and
-  the loop continues; a pause that needs human input fails the
-  operation.
+  the loop continues; a pause that needs human input escalates — an
+  answered ask resumes the loop, otherwise the operation fails (see
+  [Escalation](#escalation-ask-when-served-fail-otherwise)).
 - `ops:implement(change, scope)` — same loop with a task scope: free
   text describing the subset of the change's tasks the run is
   responsible for (e.g. `"task group 1"`, `"the env-reads tasks"`).
@@ -76,11 +79,48 @@ Per-call data is a method argument:
   job (all other tasks stay pending), and the judge accepts the pass
   when the scoped tasks are implemented — not when the whole change
   is. A scope that matches no tasks ends the pass stating that (the
-  agent must not substitute a different subset), which fails the
-  operation through the human-escalation path. Calling without a
-  scope keeps the whole-change behavior byte-for-byte.
+  agent must not substitute a different subset), which surfaces
+  through the human-escalation path — an ask when a provider serves
+  it; the operation error otherwise
+  ([Escalation](#escalation-ask-when-served-fail-otherwise)). Calling
+  without a scope keeps the whole-change behavior byte-for-byte.
 - `ops:verify(change)` — converge verification
   (`openspec-verify-change`) until it reports no critical findings or
   warnings, then sync and archive the change in the same operation.
 
 Each operation returns the final accepted review text.
+
+## Escalation (ask when served, fail otherwise)
+
+A judge-confirmed need for human input escalates through the stdlib's
+`escalate` transport: the loop pauses on an ask — the work session
+stays open — whose prompt line identifies the operation, the change,
+and the iteration state (`openspec-groom add-auth: human input
+required (iteration 2 of 10)`) and whose details carry the work
+session's label and the **full** probe text, untruncated, so the human
+can answer. Three outcomes:
+
+- **respond** — the answer is sent verbatim as the next prompt of the
+  still-open work session (no header, no framing: the human is
+  driving the agent). The iteration counts against the cap and the
+  loop continues toward convergence.
+- **abort** (the human refused the ask) — the operation fails with
+  `openspec-groom|implement|verify: human aborted escalation
+  (iteration N of M)` and no fix prompt is issued.
+- **unavailable** (no ask provider served the request: prohibited,
+  unconfigured, provider failure, or end of input) — the operation
+  fails with the same wording as before asks existed:
+  `openspec-<op>: human input is required (iteration N of M): <probe
+  excerpt>`.
+
+Whether an ask is served is the operator's provider selection
+(`--ask` > `PTAH_ASK` > `[ask]` > TTY auto-detect), never component
+config — a provider-less environment keeps the pre-ask failure
+behavior exactly. An unresolvable task scope (a scope matching no
+tasks) surfaces through this same path: an ask when a provider
+serves it, the operation error otherwise.
+
+Asks display the work session's ptah label (what the run's rendered
+stream is keyed by); showing the agent-side ACP session id is
+deferred pending
+[patextreme/ptah#20](https://github.com/patextreme/ptah/issues/20).
