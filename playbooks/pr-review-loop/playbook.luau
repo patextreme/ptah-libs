@@ -520,10 +520,13 @@ local function buildJudgePrompt(
 	}, "\n")
 end
 
-local function buildFixPrompt(ledger: Ledger, header: string): string
+-- Both prompts name the PR explicitly. A fresh resume session (a fix turn
+-- or the immediate-converge session) never saw a review prompt, so the PR
+-- URL is the only repository context it has.
+local function buildFixPrompt(prUrl: string, ledger: Ledger, header: string): string
 	local lines = {
 		header
-			.. "Resolve all of the following blocking findings in a single pass, addressing each finding's root cause rather than each symptom separately:",
+			.. `Resolve all of the following blocking findings on pull request {prUrl} in a single pass, addressing each finding's root cause rather than each symptom separately:`,
 	}
 	for _, line in findingList(ledger, "open", "blocking") do
 		table.insert(lines, line)
@@ -531,11 +534,11 @@ local function buildFixPrompt(ledger: Ledger, header: string): string
 	return table.concat(lines, "\n")
 end
 
-local function buildVerdictPrompt(ledger: Ledger, header: string): string
+local function buildVerdictPrompt(prUrl: string, ledger: Ledger, header: string): string
 	local deferred = findingList(ledger, "deferred")
 	local deferredText = if #deferred > 0 then table.concat(deferred, "\n") else "(none)"
 	return table.concat({
-		header .. "Post a comment on the PR with the final review verdict.",
+		header .. `Post a comment on pull request {prUrl} with the final review verdict.`,
 		"",
 		"Include a deferred findings list in the comment. The judge deferred these findings as important but outside the PR's intention:",
 		deferredText,
@@ -647,7 +650,7 @@ function M.new(config: Config): Instance
 			-- the deferred findings list. A resume-converge has no new review
 			-- prose, so the posted comment text is the verdict.
 			local function converge(session: Session, header: string, verdict: string): Outcome
-				local posted = session:prompt(buildVerdictPrompt(ledger, header))
+				local posted = session:prompt(buildVerdictPrompt(prUrl, ledger, header))
 				session:close()
 				persist()
 				local finalVerdict = if verdict ~= "" then verdict else posted.text
@@ -666,7 +669,7 @@ function M.new(config: Config): Instance
 					local header = `[pr-review iteration {iteration + 1} of {maxIterations}]\n`
 					local session: Session = work:session({ id = `pr-review:{iteration}` })
 					sessionConfig.apply(session, config.sessionConfig)
-					session:prompt(buildFixPrompt(ledger, header))
+					session:prompt(buildFixPrompt(prUrl, ledger, header))
 					if push ~= nil then
 						session:prompt(header .. push)
 					end
@@ -753,7 +756,7 @@ function M.new(config: Config): Instance
 				else
 					-- Batched fix turn: all open blocking findings, by root
 					-- cause, followed by commit-and-push (gated by dry-run).
-					session:prompt(buildFixPrompt(ledger, header))
+					session:prompt(buildFixPrompt(prUrl, ledger, header))
 					if push ~= nil then
 						session:prompt(header .. push)
 					end
