@@ -54,7 +54,7 @@ ops:groom("add-auth")
 | `std.daemon` | repo loop skeleton with per-repo error isolation |
 | `std.sessionConfig` | ordered session-config entries — the shared apply mechanism |
 | `openspec` | openspec change playbook (groom, implement, verify) |
-| `prReviewLoop` | PR review→fix→push convergence playbook |
+| `prReviewLoop` | convergent PR review loop (typed judge + PR-comment ledger) |
 
 Playbooks are constructed with `new(config)`; per-call data (a change name,
 a PR URL) is a method argument. See [The playbook
@@ -74,7 +74,7 @@ conventions](#loop-conventions), and [Session config](#session-config) below.
 
   | ptah_libs | Minimum ptah |
   | --- | --- |
-  | 0.1.0 | unreleased ptah main at snapshot `6307bd5` (session-config support; no ptah release published yet) |
+  | 0.1.0 | ptah 0.1.0 (session-config support and `session:sessionId()`) |
 
 - **Offline test coverage lives upstream — and is pending.** The library's
   offline suite (mock agent, no network, no real agent) is maintained in the
@@ -136,8 +136,9 @@ conventions](#loop-conventions), and [Session config](#session-config) below.
   `init.luau` module's relative requires resolve one directory off under
   luau-lsp.)
   - `openspec/` — groom, implement, and verify an openspec change.
-  - `pr-review-loop/` — review→fix→push convergence against a pull
-    request.
+  - `pr-review-loop/` — convergent review→validate→fix→verify loop
+    against a pull request (typed judge, PR-comment ledger; ships the
+    built-in persona and the component-owned protocol fragment).
 - `pesde.toml` — package manifest (`luau` target, `lib = "lib.luau"`).
 - `CONTEXT.md` — the library's vocabulary.
 
@@ -165,9 +166,11 @@ playbook policy, so each playbook writes its convergence loop over
 `std/predicate` in exactly the shape its workflow needs. The playbooks'
 loops share these conventions, documented here so drift stays visible:
 
-- Sessions: per-iteration work sessions are `<prefix>:<n>`, judge
-  sessions `<prefix>-judge:<n>`, and escalation-judge sessions
-  `<prefix>-human:<n>`.
+- Sessions: per-iteration work sessions are `<prefix>:<n>` and judge
+  sessions `<prefix>-judge:<n>`; a loop that probes for human input
+  before asking (openspec) uses escalation-judge sessions
+  `<prefix>-escalate-judge:<n>`, while the pr-review-loop's judge is itself the
+  escalation trigger and creates no probe session.
 - Every prompt of a loop is prefixed `[<prefix> iteration N of M]` so
   the agent (and the logs) can see the loop state.
 - Escalation is two-mode: **ask when a provider serves the request,
@@ -179,13 +182,17 @@ loops share these conventions, documented here so drift stays visible:
   the operation, the per-call identity, and the iteration state
   (`<prefix> <change or PR URL>: human input required (iteration N of
   M)`); its details carry the work session's label and the **full**
-  probe text, untruncated — the human must be able to answer.
+  trigger payload, untruncated — the probe text for a probing loop, the
+  full review prose for the pr-review-loop's judge-flagged escalation —
+  so the human must be able to answer.
 - Failure wording: the human refused the ask — `<prefix>: human
   aborted escalation (iteration N of M)`; no provider served the ask —
   each playbook's pre-ask wording, byte-identical (e.g. `pr-review:
   human input is required to resolve the findings (iteration N of
   M)`), so provider-less consumers see zero drift; the cap —
-  `<prefix>: did not converge within M iterations`.
+  `<prefix>: did not converge within M iterations` (the pr-review-loop
+  instead returns a non-converged typed outcome at its cap, since
+  outcomes-as-data is its contract).
 
 ### Ask behavior notes
 
@@ -205,9 +212,9 @@ config:
   forgotten terminal parks the run).
 
 Asks display the work session's ptah label (what the run's rendered
-stream is keyed by); showing the agent-side ACP session id inside
-the ask is deferred pending
-[patextreme/ptah#20](https://github.com/patextreme/ptah/issues/20).
+stream is keyed by) and the agent-side ACP session id
+(`session:sessionId()`) — the id the agent's own tooling can resume or
+list — so a human can correlate the ask with the session.
 
 ## Session config
 

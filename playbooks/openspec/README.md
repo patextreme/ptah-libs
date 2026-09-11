@@ -95,7 +95,7 @@ Each operation returns the final accepted review text.
 A judge-confirmed need for human input escalates through the stdlib's
 `escalate` transport: the loop pauses on an ask — the work session
 stays open — whose prompt line identifies the operation, the change,
-and the iteration state (`openspec-groom add-auth: human input
+and the iteration state (`opsx-groom add-auth: human input
 required (iteration 2 of 10)`) and whose details carry the work
 session's label and the **full** probe text, untruncated, so the human
 can answer. Three outcomes:
@@ -105,7 +105,7 @@ can answer. Three outcomes:
   driving the agent). The iteration counts against the cap and the
   loop continues toward convergence.
 - **abort** (the human refused the ask) — the operation fails with
-  `openspec-groom|implement|verify: human aborted escalation
+  `opsx-groom|implement|verify: human aborted escalation
   (iteration N of M)` and no fix prompt is issued.
 - **unavailable** (no ask provider served the request: prohibited,
   unconfigured, provider failure, or end of input) — the operation
@@ -121,6 +121,6 @@ tasks) surfaces through this same path: an ask when a provider
 serves it, the operation error otherwise.
 
 Asks display the work session's ptah label (what the run's rendered
-stream is keyed by); showing the agent-side ACP session id is
-deferred pending
-[patextreme/ptah#20](https://github.com/patextreme/ptah/issues/20).
+stream is keyed by) and the agent-side ACP session id
+(`session:sessionId()`) — the id the agent's own tooling can resume or
+list — so a human can correlate the ask with the session.
