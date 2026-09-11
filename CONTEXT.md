@@ -1,26 +1,28 @@
 # ptah-libs
 
-The Factory Components library's home: the shared Luau workflow library for
+The Ptah Playbooks library's home: the shared Luau workflow library for
 [ptah](https://github.com/patextreme/ptah), packaged for consumption as a
 pesde git dependency. This glossary covers the library's vocabulary; ptah's
 own glossary covers the CLI and its workflow scripts.
 
 ## Language
 
-**Factory Components**:
+**Ptah Playbooks**:
 The shared workflow library maintained in this repo, consumable by any
-repository. Units of it are stdlib helpers and Components.
-_Avoid_: shared-workflow, bricks, lego, software factory
+repository. Units of it are stdlib helpers and Playbooks.
+_Avoid_: Factory Components (the library's former name), shared-workflow,
+bricks, lego, software factory
 
 **stdlib**:
-The repo-agnostic helper layer of Factory Components — transport, typed
+The repo-agnostic helper layer of Ptah Playbooks — transport, typed
 judging, retry, and loop machinery. Knows nothing about any consumer repo.
 _Avoid_: utils, lib, common
 
-**Component**:
+**Playbook**:
 A reusable workflow capability that consumers compose and configure rather
 than fork — e.g. an openspec lifecycle or a PR review loop.
-_Avoid_: template, plugin, module (module means any Luau file)
+_Avoid_: Component (the unit's former name), template, plugin, module
+(module means any Luau file)
 
 **Convergence loop**:
 The core workflow pattern: prompt an agent, judge the result with a typed
@@ -43,7 +45,7 @@ Local config. The only workflow code a consumer repo owns.
 _Avoid_: wrapper, bootstrap
 
 **Local config**:
-The data-only configuration table a consumer repo passes into a Component or
+The data-only configuration table a consumer repo passes into a Playbook or
 stdlib call. Functions are not configuration.
 _Avoid_: settings, options file
 
@@ -51,11 +53,11 @@ _Avoid_: settings, options file
 The per-call description of which tasks an implement run is responsible
 for. Completion — and the convergence loop's acceptance — is judged
 against the scope, not against the whole change.
-_Avoid_: filter (the component cannot see the tasks), instruction (a
+_Avoid_: filter (the playbook cannot see the tasks), instruction (a
 scope redefines completion; an instruction does not)
 
 **Session config**:
-The ordered list of `(id, value)` entries a component applies to every
+The ordered list of `(id, value)` entries a playbook applies to every
 session it creates, via `setConfig`, in declared order — the consumer's
 `setConfig` sequence as data. Order is load-bearing for agents with
 dependent options.
@@ -64,7 +66,7 @@ table (a table cannot carry order)
 
 **Reviewer instruction**:
 The text that tells the work agent how to review — a configured instruction
-in Local config, or the component's built-in default. A long or repo-pinned
+in Local config, or the playbook's built-in default. A long or repo-pinned
 one points at a versioned document rather than inlining text.
 _Avoid_: instruction document, review instruction, prompt
 

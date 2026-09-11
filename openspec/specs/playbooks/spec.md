@@ -1,9 +1,8 @@
-# factory-components Specification
+# playbooks Specification
 
 ## Purpose
-
-The shared workflow library (Factory Components): repo-agnostic stdlib
-helpers and composable workflow components, packaged for consumption as a
+The shared workflow library (Ptah Playbooks): repo-agnostic stdlib
+helpers and composable workflow playbooks, packaged for consumption as a
 pesde git dependency and driven by consumers through thin shims.
 
 ## Requirements
@@ -36,7 +35,7 @@ boolean, applied to a session as `setConfig` calls in declared order after
 session creation and before the session's first prompt. The array is the
 consumer's `setConfig` call sequence expressed as data. The mechanism SHALL
 export the entry type and the apply operation so consumers building their
-own components use it verbatim, and the library's own components and judge
+own playbooks use it verbatim, and the library's own playbooks and judge
 SHALL use it so application semantics cannot drift.
 
 A nil or empty entry array SHALL apply nothing. Duplicate ids SHALL apply
@@ -53,7 +52,7 @@ remain applied.
 
 #### Scenario: Omitted or empty entry array is a no-op
 
-- **WHEN** a component or judge is configured without session-config entries, or with an empty array
+- **WHEN** a playbook or judge is configured without session-config entries, or with an empty array
 - **THEN** no `setConfig` calls are issued and the session's behavior is otherwise unchanged
 
 #### Scenario: Duplicate ids apply verbatim
@@ -127,33 +126,33 @@ supports both sequential and bounded-concurrency parallel execution.
 - **WHEN** the per-repo operation raises for one of several configured repositories
 - **THEN** the loop records that repository's failure and completes the remaining repositories
 
-### Requirement: Component facade contract
+### Requirement: Playbook facade contract
 
-Every workflow component SHALL be a module exposing a constructor that
+Every workflow playbook SHALL be a module exposing a constructor that
 accepts a data config table and returns an instance whose methods are the
-component's typed operations; config SHALL NOT contain callable hooks.
+playbook's typed operations; config SHALL NOT contain callable hooks.
 Data config SHALL include arrays of typed data records (e.g. ordered
-session-config entries) wherever the component's exported config type
+session-config entries) wherever the playbook's exported config type
 declares them. Ptah runtime handles (e.g. agent handles) SHALL be permitted
-as config values where the component's exported config type declares them.
-Components and stdlib modules SHALL be strict-mode typed so that `ptah check`
-in a consumer repo validates the consumer's config against the component's
+as config values where the playbook's exported config type declares them.
+Playbooks and stdlib modules SHALL be strict-mode typed so that `ptah check`
+in a consumer repo validates the consumer's config against the playbook's
 config type.
 
-#### Scenario: Consumer config mismatches the component type
+#### Scenario: Consumer config mismatches the playbook type
 
-- **WHEN** a consumer shim passes a config table that does not satisfy the component's exported config type and runs `ptah check`
+- **WHEN** a consumer shim passes a config table that does not satisfy the playbook's exported config type and runs `ptah check`
 - **THEN** check reports a type error naming the offending field
 
 #### Scenario: Per-call data is a method argument
 
-- **WHEN** a consumer calls a component operation that acts on a specific item (e.g. a change name or PR URL)
-- **THEN** the item is supplied as a method argument, not baked into the component's config
+- **WHEN** a consumer calls a playbook operation that acts on a specific item (e.g. a change name or PR URL)
+- **THEN** the item is supplied as a method argument, not baked into the playbook's config
 
 #### Scenario: Agent handle accepted as config
 
-- **WHEN** a consumer constructs an agent handle (from a registry name or an inline agent spec) and passes it in a config field the component's config type declares as an agent handle
-- **THEN** the component drives that role's sessions through the supplied handle and performs no agent construction of its own
+- **WHEN** a consumer constructs an agent handle (from a registry name or an inline agent spec) and passes it in a config field the playbook's config type declares as an agent handle
+- **THEN** the playbook drives that role's sessions through the supplied handle and performs no agent construction of its own
 
 #### Scenario: Callable hook rejected by the type gate
 
@@ -162,7 +161,7 @@ config type.
 
 #### Scenario: Ordered entries are data config
 
-- **WHEN** a consumer configures a component's declared session-config field with an ordered array of entry records
+- **WHEN** a consumer configures a playbook's declared session-config field with an ordered array of entry records
 - **THEN** the configuration is accepted as data config and validated against the field's declared entry type
 
 ### Requirement: Library self-containment
@@ -180,7 +179,7 @@ config.
 
 #### Scenario: Library tree is read-only
 
-- **WHEN** a component runs from a read-only install (e.g. the nix store)
+- **WHEN** a playbook runs from a read-only install (e.g. the nix store)
 - **THEN** the workflow completes without attempting to write inside the library tree
 
 ### Requirement: Escalation mechanism
@@ -220,15 +219,15 @@ made outside script code.
 - **WHEN** a consumer shim requires the library and runs `ptah check` or `ptah run` pre-flight in an environment with no ask provider configured
 - **THEN** no ask-related finding is reported for the library's escalation mechanism
 
-### Requirement: openspec component
+### Requirement: openspec playbook
 
-The library SHALL provide an openspec component whose instance exposes
+The library SHALL provide an openspec playbook whose instance exposes
 groom, implement, and verify operations on a named change: groom converges a
 change's proposals through review, implement drives task execution, and
 verify converges verification then syncs and archives the change. The
-component SHALL declare its environment requirements (an agent carrying the
+playbook SHALL declare its environment requirements (an agent carrying the
 openspec skills, `openspec` on PATH) in its documentation rather than
-bundling or installing them. Convergence is the component's own loop over
+bundling or installing them. Convergence is the playbook's own loop over
 the library's typed judge: a judge-rejected pass probes for human input;
 a confirmed need for human input escalates through the library's escalation
 mechanism — a served ask resumes the loop with the human's answer, and an
@@ -236,7 +235,7 @@ unservable or refused ask fails the operation without issuing a fix — and
 exhausting the iteration cap fails the operation with an error reporting
 the cap.
 
-On a confirmed need for human input, the component SHALL ask through the
+On a confirmed need for human input, the playbook SHALL ask through the
 library's escalation mechanism with an ask whose prompt line identifies
 the operation, the change, and the iteration state, and whose details
 carry the work session's label and the full probe text. When the ask is
@@ -249,8 +248,8 @@ provider serves the request, the operation SHALL fail with an error
 stating human input is needed — the same wording as before the ask
 existed.
 
-The component's config SHALL accept `sessionConfig`, an ordered
-session-config entry array applied to every work session the component
+The playbook's config SHALL accept `sessionConfig`, an ordered
+session-config entry array applied to every work session the playbook
 creates — every per-iteration session of groom, implement, and verify, and
 verify's archive session — and `judgeSessionConfig`, applied to every judge
 and human-escalation-probe session. The `model` and `judgeModel` config
@@ -277,7 +276,7 @@ groom and verify SHALL remain whole-change operations.
 
 #### Scenario: Missing environment requirement
 
-- **WHEN** the component's documentation is consulted for its environment requirements
+- **WHEN** the playbook's documentation is consulted for its environment requirements
 - **THEN** the agent-skill and CLI requirements are listed so a consumer can verify them before running
 
 #### Scenario: Human escalation
@@ -302,7 +301,7 @@ groom and verify SHALL remain whole-change operations.
 
 #### Scenario: Ask carries identity, session label, and full probe text
 
-- **WHEN** the component raises an escalation ask
+- **WHEN** the playbook raises an escalation ask
 - **THEN** the prompt line identifies the operation, the change, and the iteration state, and the details carry the work session's label and the full probe text without truncation
 
 #### Scenario: Iteration cap
@@ -327,12 +326,12 @@ groom and verify SHALL remain whole-change operations.
 
 #### Scenario: Work sessions receive session config
 
-- **WHEN** the component is configured with `sessionConfig` entries and any operation runs
+- **WHEN** the playbook is configured with `sessionConfig` entries and any operation runs
 - **THEN** every per-iteration work session, and verify's archive session, receives the entries in declared order before its first prompt
 
 #### Scenario: Judge and probe sessions receive judge session config
 
-- **WHEN** the component is configured with `judgeSessionConfig` entries and any operation runs
+- **WHEN** the playbook is configured with `judgeSessionConfig` entries and any operation runs
 - **THEN** every judge session and every human-escalation-probe session receives the entries in declared order before its prompt
 
 #### Scenario: Removed model field is a type error
@@ -340,13 +339,13 @@ groom and verify SHALL remain whole-change operations.
 - **WHEN** a consumer shim configures the removed `model` or `judgeModel` field and runs `ptah check`
 - **THEN** check reports a type error naming the unknown field, steering the consumer to the `sessionConfig` entry form
 
-### Requirement: PR review loop component
+### Requirement: PR review loop playbook
 
-The library SHALL provide a PR review loop component that runs a
+The library SHALL provide a PR review loop playbook that runs a
 review→fix→push convergence against a pull request, with repository-specific
 settings (agent prompts, reviewer instruction text, dry-run gating)
 expressed as config rather than code. The target repository SHALL NOT be
-component config: it arrives per call inside the PR URL.
+playbook config: it arrives per call inside the PR URL.
 
 On a confirmed need for human input (the escalation judge confirms the
 blocking findings need a human), the loop SHALL ask through the library's
@@ -363,8 +362,8 @@ provider serves the request, the operation SHALL fail with an error
 stating human input is needed to resolve the findings — the same wording
 as before the ask existed.
 
-The component's config SHALL accept `sessionConfig`, an ordered
-session-config entry array applied to every work session the component
+The playbook's config SHALL accept `sessionConfig`, an ordered
+session-config entry array applied to every work session the playbook
 creates (each review/fix iteration's session, which also posts the verdict
 comment), and `judgeSessionConfig`, applied to every judge and
 human-escalation-probe session. The `model` and `judgeModel` config
@@ -374,7 +373,7 @@ entry, and the entry order is the consumer's `setConfig` order.
 #### Scenario: Review finds fixable findings
 
 - **WHEN** the reviewer reports findings judged resolvable without a human
-- **THEN** the component drives a fix session and pushes, iterating until the review passes or escalation occurs
+- **THEN** the playbook drives a fix session and pushes, iterating until the review passes or escalation occurs
 
 #### Scenario: Human escalation asks and resumes
 
@@ -399,16 +398,16 @@ entry, and the entry order is the consumer's `setConfig` order.
 #### Scenario: Repository context is per-call
 
 - **WHEN** the loop reviews a pull request
-- **THEN** the repository context comes from the PR URL passed to the operation, and the component's config declares no repository field
+- **THEN** the repository context comes from the PR URL passed to the operation, and the playbook's config declares no repository field
 
 #### Scenario: Work sessions receive session config
 
-- **WHEN** the component is configured with `sessionConfig` entries and the review loop runs
+- **WHEN** the playbook is configured with `sessionConfig` entries and the review loop runs
 - **THEN** every per-iteration work session receives the entries in declared order before its first prompt
 
 #### Scenario: Judge and probe sessions receive judge session config
 
-- **WHEN** the component is configured with `judgeSessionConfig` entries and the review loop runs
+- **WHEN** the playbook is configured with `judgeSessionConfig` entries and the review loop runs
 - **THEN** every judge session and every human-escalation-probe session receives the entries in declared order before its prompt
 
 #### Scenario: Removed model field is a type error
@@ -418,24 +417,24 @@ entry, and the entry order is the consumer's `setConfig` order.
 
 ### Requirement: PR review instruction contract
 
-The pr-review-loop component's documentation SHALL declare the contract its
+The pr-review-loop playbook's documentation SHALL declare the contract its
 reviewer instruction must satisfy: a configured reviewer instruction defines
 what counts as a blocking issue for the repository and instructs the
 reviewer to classify findings as blocking or non-blocking, and the
-component's judge predicates and fix prompts speak that classification
-vocabulary. The component's config surface (the exported `Config` type's
+playbook's judge predicates and fix prompts speak that classification
+vocabulary. The playbook's config surface (the exported `Config` type's
 doc comment for `reviewInstruction`) SHALL state the classification
-requirement. The documentation SHALL also state the component's boundary:
+requirement. The documentation SHALL also state the playbook's boundary:
 verdicts that do not reduce to a blocking/non-blocking classification
 (score gates, approve/request-changes, report-only reviews) are a different
-component, not an instruction swap.
+playbook, not an instruction swap.
 
 The documentation SHALL present pointer-style instructions — reviewer
 instruction text that references a repository document — as the recommended
 form when the instruction is long or repo-pinned, noting that configured
 text is inlined into every iteration's review prompt.
 
-The component SHALL ship a built-in default instruction that satisfies this
+The playbook SHALL ship a built-in default instruction that satisfies this
 contract and SHALL use it when no reviewer instruction is configured; a
 configured reviewer instruction SHALL take precedence over the built-in
 default, as a full replacement (the configured text is the entire
@@ -444,18 +443,18 @@ selects the built-in default.
 
 #### Scenario: Instruction contract is declared
 
-- **WHEN** a consumer consults the pr-review-loop component's documentation before supplying a reviewer instruction
-- **THEN** the required blocking/non-blocking verdict classification is stated, along with the boundary that verdicts not reducible to it belong to a different component
+- **WHEN** a consumer consults the pr-review-loop playbook's documentation before supplying a reviewer instruction
+- **THEN** the required blocking/non-blocking verdict classification is stated, along with the boundary that verdicts not reducible to it belong to a different playbook
 
 #### Scenario: Config surface states the classification requirement
 
-- **WHEN** a consumer reads the exported `Config` type for the pr-review-loop component
+- **WHEN** a consumer reads the exported `Config` type for the pr-review-loop playbook
 - **THEN** the `reviewInstruction` field's documentation states that a configured reviewer instruction must classify findings as blocking or non-blocking, and that a nil value selects the built-in default
 
 #### Scenario: Built-in default instruction used when none is configured
 
-- **WHEN** the component is configured without `reviewInstruction` (the field is nil)
-- **THEN** reviews run against the component's built-in default instruction, which directs the reviewer to classify each finding as blocking or non-blocking (the default is the contract's reference instance)
+- **WHEN** the playbook is configured without `reviewInstruction` (the field is nil)
+- **THEN** reviews run against the playbook's built-in default instruction, which directs the reviewer to classify each finding as blocking or non-blocking (the default is the contract's reference instance)
 
 #### Scenario: Configured instruction takes precedence
 
@@ -464,12 +463,12 @@ selects the built-in default.
 
 #### Scenario: Pointer pattern is the documented long form
 
-- **WHEN** a consumer consults the pr-review-loop component's documentation with a long or repo-pinned reviewer instruction in mind
+- **WHEN** a consumer consults the pr-review-loop playbook's documentation with a long or repo-pinned reviewer instruction in mind
 - **THEN** the documentation presents pointer-style text referencing a repository document as the recommended form
 
 ### Requirement: Offline test coverage
 
-Every stdlib module and component entry point SHALL be exercised by an
+Every stdlib module and playbook entry point SHALL be exercised by an
 offline test suite against the mock agent, with no network access and no
 real agent. The suite is maintained in the ptah repository (this repository
 ships no test suite); this requirement is the library's contract that such

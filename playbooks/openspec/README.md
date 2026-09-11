@@ -1,4 +1,4 @@
-# openspec component
+# openspec playbook
 
 Groom, implement, and verify a named openspec change through a
 convergence loop: prompt an agent (running the openspec skills), judge
@@ -7,7 +7,7 @@ holds, a human is needed, or the iteration cap is reached.
 
 ## Environment requirements (declared, not bundled)
 
-This component drives an agent through the openspec workflow skills and
+This playbook drives an agent through the openspec workflow skills and
 the `openspec` CLI. Before running, verify the environment provides:
 
 - **Work agent carrying the openspec skills** — the agent you pass
@@ -22,12 +22,12 @@ the `openspec` CLI. Before running, verify the environment provides:
 - **Judge agent** — any agent that can answer typed boolean prompts
   (a small/fast model is ideal); it needs no openspec skills.
 
-The component installs none of these itself.
+The playbook installs none of these itself.
 
 ## Config (data plus declared agent handles)
 
 ```lua
-local openspec = require("<mount>/factory-components/components/openspec/component")
+local openspec = require("./luau_packages/ptah_libs").openspec
 
 local ops = openspec.new({
 	agent = ptah.agent("claude"),       -- work agent handle
@@ -114,7 +114,7 @@ can answer. Three outcomes:
   excerpt>`.
 
 Whether an ask is served is the operator's provider selection
-(`--ask` > `PTAH_ASK` > `[ask]` > TTY auto-detect), never component
+(`--ask` > `PTAH_ASK` > `[ask]` > TTY auto-detect), never playbook
 config — a provider-less environment keeps the pre-ask failure
 behavior exactly. An unresolvable task scope (a scope matching no
 tasks) surfaces through this same path: an ask when a provider

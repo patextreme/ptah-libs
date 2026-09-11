@@ -1,10 +1,10 @@
 name = "patextreme/ptah_libs"
 version = "0.1.0"
-description = "Factory Components: the shared Luau workflow library (stdlib helpers + workflow components) for ptah consumers, taken as a pesde git dependency."
+description = "Ptah Playbooks: the shared Luau workflow library (stdlib helpers + workflow playbooks) for ptah consumers, taken as a pesde git dependency."
 license = "MIT"
 repository = "https://github.com/patextreme/ptah-libs"
 
-includes = ["lib.luau", "factory-components/**", "README.md", "LICENSE", "pesde.toml"]
+includes = ["lib.luau", "std/**", "playbooks/**", "README.md", "LICENSE", "pesde.toml"]
 
 [target]
 environment = "luau"

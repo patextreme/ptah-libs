@@ -1,6 +1,6 @@
 # std
 
-The repo-agnostic helper layer of Factory Components — transport, typed
+The repo-agnostic helper layer of Ptah Playbooks — transport, typed
 judging, retry, and loop machinery. Knows nothing about any consumer
 repo. See `../README.md` for the library contract and consumption model.
 

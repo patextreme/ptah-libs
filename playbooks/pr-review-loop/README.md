@@ -1,8 +1,8 @@
-# pr-review-loop component
+# pr-review-loop playbook
 
 Run a review→fix→push convergence against a pull request: an agent
 reviews the PR following a reviewer instruction — configured text when
-one is supplied, otherwise the component's built-in default — a typed
+one is supplied, otherwise the playbook's built-in default — a typed
 judge decides whether blocking issues remain, and the loop escalates to
 a human, iterates through fixes and pushes, or converges and posts the
 verdict as a PR comment. Extracted and generalized from identus-ws's
@@ -25,14 +25,14 @@ and its reviewer instruction:
 
 Verdicts that do not reduce to a blocking/non-blocking classification
 — score gates, approve/request-changes votes, report-only reviews —
-are a **different component**, not an instruction swap: loop shape is
-component policy, and this loop's shape is the convergence gate
+are a **different playbook**, not an instruction swap: loop shape is
+playbook policy, and this loop's shape is the convergence gate
 above. Swapping the instruction changes what "blocking" means for the
 repo, not what the loop does with the classification.
 
 ## The built-in default
 
-Leave `reviewInstruction` nil and reviews run against the component's
+Leave `reviewInstruction` nil and reviews run against the playbook's
 built-in default instruction — no instruction to author, no
 dependency on this repository's layout. The default
 (`default-instruction.luau`, next to this README) is a full reviewer
@@ -59,7 +59,7 @@ pointing at the file — rather than inlining the document's content:
 reviewInstruction = "Follow the reviewer instruction at .ptah/instructions/reviewer.md",
 ```
 
-The component treats such text identically to any other (pointer-style
+The playbook treats such text identically to any other (pointer-style
 text cannot be reliably detected, so it is never special-cased). The
 honest trade: configured text is inlined into every iteration's review
 prompt (up to `maxIterations` per run) — fine at the built-in
@@ -80,7 +80,7 @@ longer instructions.
 ## Config (data plus declared agent handles)
 
 ```lua
-local prReview = require("<mount>/factory-components/components/pr-review-loop/component")
+local prReview = require("./luau_packages/ptah_libs").prReviewLoop
 
 local loop = prReview.new({
 	agent = ptah.agent("claude"),        -- work agent handle
@@ -128,7 +128,7 @@ branch — a gate for rehearsing instruction changes against a real
 reviewer without pushing. The converged session still posts the
 verdict comment: dry-run gates the branch, not the PR conversation.
 
-The component ships facade-only (`:review`). A `run()` daemon
+The playbook ships facade-only (`:review`). A `run()` daemon
 convenience (looping over open PRs) was deliberately deferred: it is
 sugar over `std.daemon` + `:review` and can be added without breaking
 the facade.
@@ -160,7 +160,7 @@ answer. Three outcomes:
   M)`.
 
 Whether an ask is served is the operator's provider selection
-(`--ask` > `PTAH_ASK` > `[ask]` > TTY auto-detect), never component
+(`--ask` > `PTAH_ASK` > `[ask]` > TTY auto-detect), never playbook
 config — a provider-less environment keeps the pre-ask failure
 behavior exactly.
 
