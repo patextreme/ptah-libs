@@ -97,7 +97,7 @@ function M.new(config: Config): Instance
 			local probe = session:prompt(header .. opts.probePrompt)
 			local needsHuman = predicate(opts.humanPredicate, probe.text, {
 				agent = config.judgeAgent,
-				sessionId = `{sessionId}-human:{iteration}`,
+				sessionId = `{sessionId}-escalate-judge:{iteration}`,
 				sessionConfig = config.judgeSessionConfig,
 			})
 			if needsHuman then
@@ -138,7 +138,7 @@ function M.new(config: Config): Instance
 		groom = function(_self: Instance, change: string): string
 			ptah.log(`openspec: reviewing change {change}`)
 			local text =
-				drive("openspec-groom", `Review the openspec change named {change} using the openspec-review skill`, {
+				drive("opsx-groom", `Review the openspec change named {change} using the openspec-review skill`, {
 					change = change,
 					accepted = "The review does not contain any blocker findings",
 					probePrompt = "For the blocking findings, do you know how to resolve them, or do you need human input?",
@@ -169,7 +169,7 @@ function M.new(config: Config): Instance
 					`Implement the pending tasks of the openspec change named {change} using the openspec-apply-change skill. End each pass either with all tasks implemented or paused with a stated reason, as the skill defines those states.`
 				accepted = "All tasks of the change are implemented"
 			end
-			local text = drive("openspec-implement", prompt, {
+			local text = drive("opsx-implement", prompt, {
 				change = change,
 				accepted = accepted,
 				probePrompt = "For the pause: can you resolve it yourself (for example by updating the change's artifacts per the apply skill), or does it require human input to continue?",
@@ -182,7 +182,7 @@ function M.new(config: Config): Instance
 		verify = function(_self: Instance, change: string): string
 			ptah.log(`openspec: verifying change {change}`)
 			local text = drive(
-				"openspec-verify",
+				"opsx-verify",
 				`Verify the implementation of the openspec change named {change} using the openspec-verify-change skill`,
 				{
 					change = change,
@@ -194,7 +194,7 @@ function M.new(config: Config): Instance
 			)
 			-- The sync-and-archive step is part of the same operation: it
 			-- runs once the verification loop has converged.
-			local archiver: Session = work:session({ id = "openspec-archiver" })
+			local archiver: Session = work:session({ id = "opsx-archiver" })
 			sessionConfig.apply(archiver, config.sessionConfig)
 			archiver:prompt(`Please sync and archive the change {change}`)
 			archiver:close()

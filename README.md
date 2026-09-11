@@ -169,7 +169,7 @@ loops share these conventions, documented here so drift stays visible:
 - Sessions: per-iteration work sessions are `<prefix>:<n>` and judge
   sessions `<prefix>-judge:<n>`; a loop that probes for human input
   before asking (openspec) uses escalation-judge sessions
-  `<prefix>-human:<n>`, while the pr-review-loop's judge is itself the
+  `<prefix>-escalate-judge:<n>`, while the pr-review-loop's judge is itself the
   escalation trigger and creates no probe session.
 - Every prompt of a loop is prefixed `[<prefix> iteration N of M]` so
   the agent (and the logs) can see the loop state.
