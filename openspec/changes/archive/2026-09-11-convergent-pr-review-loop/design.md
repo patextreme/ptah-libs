@@ -32,6 +32,9 @@ spec. This document covers the how and the decisions behind it.
   trigger.
 - Multi-PR orchestration (the `run()` daemon convenience remains deferred).
 - Non-GitHub PR hosts (the `gh`-shaped transport is the environment requirement).
+- Extending the offline test suite for the new behavior — the suite lives in the ptah
+  repository and this change ships no tests; that extension is tracked by the
+  ptah-side adoption change.
 
 ## Decisions
 
@@ -48,15 +51,18 @@ load-bearing; there is no prose-parsing fallback to fall back *to*.
 
 **D2 — Prompt assembly is four parts, one of them non-removable.** Every review
 prompt is: persona (`reviewInstruction` or built-in default, full replacement) +
-protocol fragment (component-owned string module; delta rules, recurrence-by-ledger-id,
-family reuse-or-justify) + phase directive (discover vs verify) + ledger data
+protocol fragment (component-owned string module; delta rules, in-session validation
+directive, recurrence-by-ledger-id, family reuse-or-justify) + phase directive
+(discover vs verify) + ledger data
 (family names, open findings, `lastReviewedSha`). The protocol append changes the
 old "full replacement" contract and is the load-bearing wall: a persona replacement
 like compact#70's can no longer strip convergence mechanics.
 
 **D3 — Validation lives in the work session, not in ptah fan-out.** The reviewer
-validates its own blocking findings with its in-session subagents (as today's probe
-does); the judge reads the validation outcomes from the prose. *Alternative:* the
+validates its own blocking findings with its in-session subagents; the trigger is a
+directive carried by the component-owned protocol fragment (D2), so it cannot be
+stripped by a persona replacement and does not depend on the separate probe prompt
+that D6 removes. The judge reads the validation outcomes from the prose. *Alternative:* the
 script fans out one typed subagent session per finding via `ptah.parallel` — more
 deterministic and cacheable, but it doubles ACP session cost and loses the
 work-session context; rejected per scope decision. Verdicts are still cached — by
@@ -134,9 +140,11 @@ re-fetches.
    default 15 → 8 (configurable), `judgeAgent` now required and its judge now
    receives typed resultSchema sessions, new optional `blockingAdditions`, `review`
    returns an outcome object instead of a string, escalation probe wording changes.
-5. Offline test coverage (ptah repo) extended: phase machine, judge typed findings
-   and retries, ledger create/read/update/compaction against a mocked `gh`, cap
-   semantics (no fix on the last unit), escalation paths.
+5. Offline test coverage stays out of scope: the suite lives in the ptah repository
+   and this change ships no tests. Extending it for the new behavior (phase machine,
+   judge typed findings and retries, ledger create/read/update/compaction against a
+   mocked `gh`, cap semantics, escalation paths) is tracked by the ptah-side adoption
+   change; the library's *Offline test coverage* requirement is unchanged.
 6. Rollback: the previous playbook shape remains at the prior tag; consumers pin it.
 
 ## Open Questions

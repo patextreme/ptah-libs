@@ -20,7 +20,9 @@ refiling them.
 
 The work session reviews freely in prose following its persona instruction and SHALL
 validate blocking findings with its own in-session subagents before finalizing its
-review. The playbook SHALL convert the work session's prose into structured data
+review. The directive to do so SHALL be carried by the component-owned protocol
+fragment, not the configurable persona, so a persona replacement cannot remove it.
+The playbook SHALL convert the work session's prose into structured data
 through a typed judge session (a `resultSchema` result): the judge SHALL receive the
 review prose, the ledger state, the PR's intention, and the configured
 `blockingAdditions` text, and SHALL return typed findings carrying per-finding
@@ -67,9 +69,12 @@ SHALL NOT exist: a model choice is an ordinary `sessionConfig` entry, and the en
 order is the consumer's `setConfig` order.
 
 The `review` operation SHALL return a typed outcome carrying a status
-(`converged` / `non-converged` / escalation failure state), the final verdict text,
-and the final ledger snapshot — outcomes as data, matching the library's transport
-conventions — rather than a bare verdict string.
+(`converged` / `non-converged`), the final verdict text, and the final ledger
+snapshot — outcomes as data, matching the library's transport conventions — rather
+than a bare verdict string. Escalation failures do not appear in the outcome: an
+aborted or unservable ask fails the operation with an error, and an answered ask
+continues the loop toward convergence, so the returned status is always
+`converged` or `non-converged`.
 
 #### Scenario: First pass reviews the whole PR
 
@@ -109,7 +114,7 @@ conventions — rather than a bare verdict string.
 #### Scenario: Validation happens in the work session
 
 - **WHEN** the reviewer reports blocking findings during a review pass
-- **THEN** the work session validates them with its own in-session subagents and the validation outcomes reach the judge as part of the review prose
+- **THEN** the review prompt carries the component-owned protocol fragment's in-session validation directive, the work session validates the findings with its own in-session subagents, and the validation outcomes reach the judge as part of the review prose
 
 #### Scenario: Deferred findings do not gate convergence
 
@@ -163,8 +168,8 @@ conventions — rather than a bare verdict string.
 
 #### Scenario: Operation returns a typed outcome
 
-- **WHEN** the `review` operation ends — converged, non-converged at the cap, or after an answered-ask iteration
-- **THEN** the operation returns a typed outcome carrying the status, the final verdict text, and the final ledger snapshot, rather than only a verdict string
+- **WHEN** the `review` operation ends — converged, or non-converged at the cap (including a run whose last unit followed an answered ask)
+- **THEN** the operation returns a typed outcome carrying the status (`converged` / `non-converged`), the final verdict text, and the final ledger snapshot, rather than only a verdict string, and an escalation failure raises an error instead of returning an outcome
 
 ### Requirement: PR review instruction contract
 
@@ -175,7 +180,8 @@ value selects the default; an empty string stays configured as a loud
 misconfiguration) and carries no classification duties — the reviewer reviews freely
 in prose. The **protocol** layer is a component-owned instruction fragment appended
 to every review prompt at runtime and not configurable away: the delta-review rules,
-report-recurrences-by-ledger-id rule, and family reuse-or-justify guidance. The
+the in-session validation directive, the report-recurrences-by-ledger-id rule, and
+family reuse-or-justify guidance. The
 **taxonomy** layer is the judge's: what counts as blocking for the repository arrives
 through the `blockingAdditions` config field (free text supplied to the judge), not
 through the reviewer instruction, so the loop's structure is not sensitive to the
@@ -221,7 +227,7 @@ directive (classification belongs to the judge).
 #### Scenario: Protocol is not configurable away
 
 - **WHEN** any review pass runs, with a configured persona or the built-in default
-- **THEN** the review prompt carries the component-owned protocol fragment (delta rules, recurrence-by-ledger-id, family reuse guidance) in addition to the persona
+- **THEN** the review prompt carries the component-owned protocol fragment (delta rules, in-session validation directive, recurrence-by-ledger-id, family reuse guidance) in addition to the persona
 
 #### Scenario: Pointer pattern is the documented long form
 

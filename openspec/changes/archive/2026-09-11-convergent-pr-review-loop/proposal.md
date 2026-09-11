@@ -31,12 +31,14 @@ exists in the stdlib.
   push is followed by at least one review pass.
 - **BREAKING**: Instruction contract reshaped into three layers: persona
   (`reviewInstruction`, repo-authored, no classification duties), protocol (hardcoded append,
-  never configurable away: delta rules, ledger recurrence reporting, family reuse), taxonomy
+  never configurable away: delta rules, in-session validation directive, ledger recurrence
+  reporting, family reuse), taxonomy
   (judge + new `blockingAdditions` config data). The default instruction drops its
   classification directive.
-- **`:review` returns a typed outcome** (status converged / non-converged / escalated, verdict
+- **`:review` returns a typed outcome** (status `converged` / `non-converged`, verdict
   text, ledger snapshot) instead of a bare verdict string, matching the stdlib's
-  outcomes-as-data convention.
+  outcomes-as-data convention. Escalation failures do not appear as a status: an
+  aborted or unservable ask raises, and an answered ask continues the loop.
 - **Out of scope (declared non-goals)**: CI check reading/`waitForChecks`, configured gates,
   closure-audit mode, computed escalation tables. Deterministic signals and post-loop policy
   are the caller's script's job. Escalation has exactly one in-loop trigger: the judge's
@@ -75,5 +77,7 @@ exists in the stdlib.
   required, `blockingAdditions` replacing per-instruction classification.
 - No stdlib changes expected; uses existing `std/predicate` retry pattern, `std/escalate`,
   `std/gh`, `std/session-config`.
-- Test suite lives in the ptah repository; coverage there must be extended to the new
-  phase machine, judge typed findings, ledger compaction, and cap semantics.
+- **Out of scope (decided during implementation):** the offline test-suite extension
+  for the new behavior. The library's suite lives in the ptah repository and this
+  change ships no tests; extending it (phase machine, judge typed findings, ledger
+  compaction, cap semantics) is tracked by the ptah-side adoption change.

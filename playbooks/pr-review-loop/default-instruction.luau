@@ -1,13 +1,13 @@
 --!strict
--- The built-in reviewer instruction: the reference instance of the
--- instruction contract declared in this directory's README.md — it
--- carries a full reviewer persona and (Output section, item 7)
--- directs the blocking/non-blocking classification the loop's judge
--- and fix prompts speak. Ported from this repository's own reviewer
+-- The built-in reviewer instruction: the persona layer of the
+-- instruction contract declared in this directory's README.md — a full
+-- reviewer persona with no classification duties (classification
+-- belongs to the judge; the component-owned protocol fragment carries
+-- the loop mechanics). Ported from this repository's own reviewer
 -- instruction with the skill-file frontmatter and the `$ARGUMENTS`
 -- input-dispatch section dropped (the component fixes the review
--- target to the PR URL); everything else verbatim, plus the appended
--- classification directive. Data only — content, not logic.
+-- target to the PR URL); everything else verbatim. Data only —
+-- content, not logic.
 
 return [==[
 You are a code reviewer. Your job is to review code changes and provide actionable feedback.
@@ -72,5 +72,4 @@ You are a code reviewer. Your job is to review code changes and provide actionab
 4. Your tone should be matter-of-fact and not accusatory or overly positive. It should read as a helpful AI assistant suggestion without sounding too much like a human reviewer.
 5. Write so the reader can quickly understand the issue without reading too closely.
 6. AVOID flattery, do not give any comments that are not helpful to the reader. Avoid phrasing like "Great job ...", "Thanks for ...".
-7. Classify every finding as BLOCKING (must be resolved before the change is accepted) or NON-BLOCKING.
 ]==]
