@@ -70,6 +70,13 @@ in Local config, or the playbook's built-in default. A long or repo-pinned
 one points at a versioned document rather than inlining text.
 _Avoid_: instruction document, review instruction, prompt
 
+**PR review report**:
+The human-facing summary of a whole PR review loop, posted as a marked PR
+comment (edited in place across runs) on every terminal outcome that returns.
+Authored by a dedicated reporter agent under a fixed section contract, with a
+deterministic status line prepended by the playbook from the ledger.
+_Avoid_: verdict comment (the retired name), summary comment, review summary
+
 **ptah_libs**:
 This repository as a pesde package (`patextreme/ptah_libs`, `luau`
 target): one entry exposing the named camelCase exports, taken by

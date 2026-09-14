@@ -27,9 +27,11 @@ pass** — the loop cannot exit having just mutated the PR.
   configured `blockingAdditions`, and returns typed findings (severity,
   family, validation status, `needsHuman`) plus a reconciliation of the
   ledger's open findings.
-- **Converge** — when the judge reports no open blocking findings, the
-  converged work session posts the verdict comment, including the deferred
-  findings list.
+- **Converge and report** — when the judge reports no open blocking
+  findings, the loop closes the review session, the **reporter agent**
+  authors the PR review report, and the playbook prepends a deterministic
+  status line and posts the marked report comment (edited in place across
+  runs). See [The PR review report](#the-pr-review-report).
 - **Fix** — when open blocking findings remain and budget remains, one batched
   fix turn addresses all of them by root cause, followed by commit-and-push
   (gated by `dryRun`).
@@ -105,10 +107,13 @@ table, and the resolved count.
 - **Auto-resume, no flag.** A fresh `review()` against a PR whose ledger
   comment exists resumes from it: open blocking findings drive a fix turn; a
   clean ledger at the current head converges immediately.
-- **Compaction.** Once a finding's fix is verified clean in a later review
-  pass, the finding collapses to a resolved count (its evidence stays in git
-  history), so the comment stays within platform size limits on long-running
-  PRs.
+- **Retention.** Once a finding's fix is verified clean in a later review
+  pass, the finding is retained as a terminal one-line entry with status
+  `fixed` (id, title, family, fixing commit) and the resolved count
+  advances — so the report can list what was fixed. The ledger grows with
+  the PR; the report caps its resolved list, and a ledger that outgrows the
+  platform comment limit fails loudly through the transport rather than
+  truncating.
 - **Playbook-owned.** The ledger is the playbook's data. Hand-editing it is
   unsupported, and a deleted ledger degrades a fresh run to a new discovery
   pass (today's per-run behavior) rather than being defended against.
@@ -121,6 +126,46 @@ the body is absent it falls back to the last commit message before the first
 ledger record. Later passes reuse the cached intention; the judge never
 re-fetches it.
 
+## The PR review report
+
+Every terminal outcome that *returns* — converged, or non-converged at the cap
+— produces a **PR review report**: a human-facing summary of the whole loop,
+posted as a dedicated PR comment marked `<!-- ptah:pr-review-report -->` and
+**edited in place** across runs (the same marker-and-edit lifecycle as the
+ledger, so a re-run edits rather than appends). A run that *fails* — an
+aborted or unservable escalation, or reporter exhaustion — raises and posts no
+report.
+
+The report is authored by a dedicated **reporter agent** (`reporterAgent`,
+required; `reporterSessionConfig` optional). The reporter submits a typed
+single-field result (the report body), bounded-retried exactly as the judge
+is; exhaustion fails the operation with an error naming the reporter and the
+attempt count — never a silent absence of the report. The converged work
+session does **not** author or post the report.
+
+The playbook prepends a **deterministic status line** — the outcome status and
+the count of open blocking findings, read from the ledger — so the report's
+convergence claim is never agent-authored. The reporter authors the body under
+a fixed section contract:
+
+- *What this PR does* — the PR's intention.
+- *Findings resolved* — one line per resolved finding, capped at the 50 most
+  recent with an "…and N earlier omitted" note (the ledger retains every
+  entry).
+- *Open non-blocking*, *Deferred*, *Accepted* — one line per finding.
+- *Loop summary* — iterations, the discovery and last-reviewed commits, and
+  the family table.
+- *Open blocking* — for a non-converged outcome only, leading the body.
+
+The reporter session receives the full ledger (every status group, including
+retained `fixed` entries), the terminal status, and the section contract, plus
+the last review pass's prose when the current operation ran one. A resume that
+converges immediately, or that ends at the cap without a new review pass, has
+no prose, so the prompt carries an explicit no-prose marker and the report is
+rendered from the ledger alone. `outcome.report` carries the posted text
+(status line plus body), so a caller can display the report without re-reading
+the PR; `outcome.verdict` keeps its meaning (the final review verdict text).
+
 ## Environment requirements (declared, not bundled)
 
 - **`gh`-based PR host** — the PR URL must be a GitHub pull request URL, and
@@ -131,6 +176,10 @@ re-fetches it.
 - **Work agent able to spawn subagents** — the protocol fragment directs the
   reviewer to validate blocking findings with its own in-session subagents.
 - **Judge agent** — any agent that can answer a typed `resultSchema` prompt.
+- **Reporter agent** — any agent that can answer a typed `resultSchema`
+  prompt; it authors the PR review report body. A weak model is adequate:
+  the report is a rendering of typed ledger data plus the deterministic
+  status line.
 - **One loop per PR** — see [The ledger](#the-ledger).
 - **No CI or gate reading** — the playbook never reads check results or
   executes gate commands; that is the calling script's job.
@@ -141,13 +190,17 @@ re-fetches it.
 local prReview = require("./luau_packages/ptah_libs").prReviewLoop
 
 local loop = prReview.new({
-	agent = ptah.agent("claude"),        -- work agent handle
-	judgeAgent = ptah.agent("claude"),   -- required judge agent handle
-	sessionConfig = {                    -- optional: applied to every
-		{ id = "model", value = "opus" },    -- review/fix session (which
-	},                                   -- also posts the verdict comment)
-	judgeSessionConfig = {               -- optional: applied to every judge
-		{ id = "model", value = "haiku" },   -- session
+	agent = ptah.agent("claude"),         -- work agent handle
+	judgeAgent = ptah.agent("claude"),    -- required judge agent handle
+	reporterAgent = ptah.agent("claude"), -- required reporter agent handle
+	sessionConfig = {                     -- optional: applied to every
+		{ id = "model", value = "opus" },     -- review/fix session
+	},
+	judgeSessionConfig = {                -- optional: applied to every judge
+		{ id = "model", value = "haiku" },    -- session
+	},
+	reporterSessionConfig = {             -- optional: applied to every
+		{ id = "model", value = "haiku" },    -- reporter session
 	},
 	-- optional (default when nil: the built-in persona): the persona
 	-- layer — the entire reviewer instruction as text, full replacement,
@@ -164,11 +217,12 @@ local loop = prReview.new({
 
 Session-config entries (`{ id, value }`, applied in declared array
 order — see the library README's [Session config](../../README.md#session-config)
-section) reach: `sessionConfig` → each review/fix work session (the session
-that also posts the verdict comment); `judgeSessionConfig` → every judge
-session. Option ids are agent-specific — enumerate what your agent offers with
-`session:configOptions()`. The removed `model`/`judgeModel` fields are
-nil-typed: configuring one is a `ptah check` type error naming the field.
+section) reach: `sessionConfig` → each review/fix work session;
+`judgeSessionConfig` → every judge session; `reporterSessionConfig` → every
+reporter session. Option ids are agent-specific — enumerate what your agent
+offers with `session:configOptions()`. The removed `model`/`judgeModel`
+fields are nil-typed: configuring one is a `ptah check` type error naming the
+field.
 
 `judgeAgent` is **required and load-bearing**: the loop's convergence is
 computed from the judge's typed output, and there is no prose-parsing
@@ -182,19 +236,19 @@ fix prompt issued).
   per-call data and the sole repository context. Returns a **typed outcome**:
 
   ```lua
-  { status = "converged" | "non-converged", verdict = "<final verdict text>", ledger = { ... } }
+  { status = "converged" | "non-converged", verdict = "<final verdict text>", ledger = { ... }, report = "<posted report text>" }
   ```
 
   Outcomes as data, so the caller's script can gate its own post-loop steps
-  (CI, gates) on the loop's end state. Escalation failures do not appear in
-  the outcome: an aborted or unservable ask raises, so the returned status is
-  always `converged` or `non-converged`.
+  (CI, gates) on the loop's end state. `report` is the exact text posted as
+  the PR review report (status line plus body). Escalation failures do not
+  appear in the outcome: an aborted or unservable ask raises, so the returned
+  status is always `converged` or `non-converged`.
 
 With `dryRun = true` the commit-and-push step is skipped entirely: the loop
 still reviews, judges, and fixes, but never pushes to the PR branch — a gate
 for rehearsing persona changes against a real reviewer without pushing. The
-converged session still posts the verdict comment: dry-run gates the branch,
-not the PR conversation.
+report is still posted: dry-run gates the branch, not the PR conversation.
 
 The playbook ships facade-only (`:review`). A `run()` daemon convenience
 (looping over open PRs) was deliberately deferred: it is sugar over
@@ -242,9 +296,20 @@ This is a breaking reshape. Every breaking item in the change proposal:
 - **`judgeAgent` is required and now receives typed `resultSchema` sessions**
   (findings, not booleans). A judge agent that cannot submit a typed result
   fails the iteration after bounded retries.
+- **`reporterAgent` is required and `reporterSessionConfig` is new.** The
+  report is authored by a dedicated reporter agent; a consumer that does not
+  configure one fails `ptah check`.
+- **The converged work-session comment is replaced by the PR review
+  report.** The converged work session no longer posts a comment; the
+  playbook posts the report on every returned terminal outcome (converged and
+  capped). Read `outcome.report` for the posted text. A failed run (aborted
+  or unservable ask, reporter exhaustion) raises and posts no report.
+- **The ledger retains resolved findings** as terminal `fixed` entries
+  instead of collapsing them into a count. The report caps its resolved list
+  at 50; the ledger grows with the PR.
 - **`review()` returns an outcome object, not a bare verdict string.** Read
-  `outcome.status`, `outcome.verdict`, and `outcome.ledger` instead of the
-  returned string.
+  `outcome.status`, `outcome.verdict`, `outcome.ledger`, and `outcome.report`
+  instead of the returned string.
 - **`reviewInstruction` is now the persona layer only.** The built-in default
   no longer carries a classification directive, and a configured instruction
   is no longer asked to classify findings. Move the repository's blocking
