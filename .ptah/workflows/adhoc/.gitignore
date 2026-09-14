@@ -1,0 +1,5 @@
+*
+!.gitignore
+!main.luau
+!review.luau
+!extract-issue-worker.luau
