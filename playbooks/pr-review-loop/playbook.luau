@@ -24,7 +24,10 @@
 --   * a fix is issued only when budget remains, so every push is followed
 --     by at least one review pass;
 --   * the judge's `needsHuman` flag routes through std/escalate — a served
---     answer resumes the still-open work session, abort/unavailable fail.
+--     answer resumes the still-open work session, abort/unavailable fail;
+--   * every returned terminal outcome posts a PR review report: a reporter
+--     agent authors the body, and the playbook prepends a deterministic
+--     status line and posts the marked comment.
 
 local gh = require("../../std/gh")
 local sessionConfig = require("../../std/session-config")
@@ -51,8 +54,9 @@ export type LedgerFinding = {
 }
 
 -- The playbook-owned ledger: PR identity, the discovery and last-reviewed
--- SHAs, the PR's intention, the findings, the family table, and the count of
--- findings compacted away once verified clean.
+-- SHAs, the PR's intention, the findings (resolved findings retained with
+-- status `fixed`), the family table, and the count of findings resolved once
+-- verified clean.
 export type Ledger = {
 	pr: string,
 	discoverySha: string,
@@ -92,28 +96,42 @@ export type Findings = {
 	priorFindingsStatus: { JudgeReconciliation },
 }
 
+-- The reporter session's typed result: the report body. The playbook prepends
+-- the deterministic status line, so it is not part of this contract.
+export type Report = {
+	report: string,
+}
+
 -- The `review` operation's outcome: outcomes as data, so the caller's script
 -- can gate its own post-loop steps (CI, gates) on the loop's end state.
 export type Outcome = {
 	status: "converged" | "non-converged",
 	verdict: string,
 	ledger: Ledger,
+	-- The posted PR review report text: the playbook's deterministic status
+	-- line followed by the reporter's authored body.
+	report: string,
 }
 
 export type Config = {
-	-- Work agent handle reviewing and fixing the PR (and posting the verdict
-	-- comment on convergence).
+	-- Work agent handle reviewing and fixing the PR. The work session never
+	-- posts to the PR; the playbook posts the report.
 	agent: Agent,
 	-- Judge agent handle for the typed findings session. Required: the loop's
 	-- convergence is computed from the judge's typed output, and there is no
 	-- prose-parsing fallback.
 	judgeAgent: Agent,
+	-- Reporter agent handle for the PR review report's typed body session.
+	-- Required: the reporter authors the report; the playbook prepends the
+	-- status line and posts the marked comment.
+	reporterAgent: Agent,
 	-- Ordered session-config entries applied to every work session the
-	-- playbook creates: each review/fix iteration's session, which also posts
-	-- the verdict comment.
+	-- playbook creates: each review/fix iteration's session.
 	sessionConfig: { sessionConfig.Entry }?,
 	-- Ordered session-config entries applied to every judge session.
 	judgeSessionConfig: { sessionConfig.Entry }?,
+	-- Ordered session-config entries applied to every reporter session.
+	reporterSessionConfig: { sessionConfig.Entry }?,
 	-- The removed model fields, kept nil-typed so a configured value is a
 	-- type error naming the field (the analyzer does not flag unknown keys):
 	-- a model choice is an ordinary sessionConfig entry.
@@ -144,7 +162,12 @@ export type Instance = {
 
 local DEFAULT_MAX_ITERATIONS = 8
 local DEFAULT_JUDGE_ATTEMPTS = 3
+local DEFAULT_REPORTER_ATTEMPTS = 3
 local LEDGER_MARKER = "<!-- ptah:pr-review-ledger -->"
+local REPORT_MARKER = "<!-- ptah:pr-review-report -->"
+-- The report's *Findings resolved* list caps at the 50 most recent entries;
+-- the ledger still retains every entry.
+local RESOLVED_LIST_CAP = 50
 
 -- The judge session's result contract: typed findings plus the reconciliation
 -- of the ledger findings the judge was shown.
@@ -184,6 +207,16 @@ local FINDINGS_SCHEMA: { [string]: any } = {
 		},
 	},
 	required = { "findings", "priorFindingsStatus" },
+}
+
+-- The reporter session's result contract: the single report-body field.
+local REPORT_SCHEMA: { [string]: any } = {
+	type = "object",
+	additionalProperties = false,
+	properties = {
+		report = { type = "string" },
+	},
+	required = { "report" },
 }
 
 -- ---------------------------------------------------------------------------
@@ -251,7 +284,8 @@ local function collectComments(raw: any): { any }
 	return out
 end
 
-local function readLedger(prUrl: string): { ledger: Ledger?, commentId: number? }
+-- List the PR's issue comments: the transport behind both markers.
+local function listComments(prUrl: string): { any }
 	local ref = parsePrUrl(prUrl)
 	if ref == nil then
 		error(`pr-review: {prUrl} is not a GitHub pull request URL`)
@@ -261,7 +295,11 @@ local function readLedger(prUrl: string): { ledger: Ledger?, commentId: number? 
 	if not outcome.ok then
 		error(`pr-review: could not read PR comments for {prUrl}: {outcome.stderr}`)
 	end
-	for _, comment in collectComments(outcome.json) do
+	return collectComments(outcome.json)
+end
+
+local function readLedger(prUrl: string): { ledger: Ledger?, commentId: number? }
+	for _, comment in listComments(prUrl) do
 		local body = comment.body
 		if type(body) == "string" and string.find(body, LEDGER_MARKER, 1, true) ~= nil then
 			return { ledger = parseLedgerBody(body), commentId = commentDatabaseId(comment) }
@@ -296,6 +334,64 @@ local function updateLedgerComment(prUrl: string, commentId: number, ledger: Led
 	local outcome = gh.run({ "api", "--method", "PATCH", path, "-f", `body={ledgerBody(ledger)}` }, { json = true })
 	if not outcome.ok then
 		error(`pr-review: could not update the ledger comment on {prUrl}: {outcome.stderr}`)
+	end
+end
+
+-- ---------------------------------------------------------------------------
+-- Report transport (std/gh): the ledger's marker-and-edit lifecycle
+-- ---------------------------------------------------------------------------
+
+local function reportBody(text: string): string
+	return REPORT_MARKER .. "\n\n" .. text .. "\n"
+end
+
+local function readReportCommentId(prUrl: string): number?
+	for _, comment in listComments(prUrl) do
+		local body = comment.body
+		if type(body) == "string" and string.find(body, REPORT_MARKER, 1, true) ~= nil then
+			return commentDatabaseId(comment)
+		end
+	end
+	return nil
+end
+
+local function createReportComment(prUrl: string, text: string): number?
+	local ref = parsePrUrl(prUrl)
+	if ref == nil then
+		error(`pr-review: {prUrl} is not a GitHub pull request URL`)
+	end
+	local path = `/repos/{ref.owner}/{ref.repo}/issues/{ref.number}/comments`
+	local outcome = gh.run({ "api", "--method", "POST", path, "-f", `body={reportBody(text)}` }, { json = true })
+	if not outcome.ok then
+		error(`pr-review: could not create the report comment on {prUrl}: {outcome.stderr}`)
+	end
+	local id = outcome.json.id
+	if type(id) == "number" then
+		return id
+	end
+	return nil
+end
+
+local function updateReportComment(prUrl: string, commentId: number, text: string)
+	local ref = parsePrUrl(prUrl)
+	if ref == nil then
+		error(`pr-review: {prUrl} is not a GitHub pull request URL`)
+	end
+	local path = `/repos/{ref.owner}/{ref.repo}/issues/comments/{commentId}`
+	local outcome = gh.run({ "api", "--method", "PATCH", path, "-f", `body={reportBody(text)}` }, { json = true })
+	if not outcome.ok then
+		error(`pr-review: could not update the report comment on {prUrl}: {outcome.stderr}`)
+	end
+end
+
+-- Read/create/update in one step: a re-run edits the existing report in place
+-- rather than appending a second comment.
+local function postReport(prUrl: string, text: string)
+	local existingId = readReportCommentId(prUrl)
+	if existingId == nil then
+		createReportComment(prUrl, text)
+	else
+		updateReportComment(prUrl, existingId, text)
 	end
 end
 
@@ -371,13 +467,18 @@ local function contains(list: { string }, value: string): boolean
 	return false
 end
 
-local function hasOpenBlocking(ledger: Ledger): boolean
+local function openBlockingCount(ledger: Ledger): number
+	local count = 0
 	for _, finding in ledger.findings do
 		if finding.severity == "blocking" and finding.status == "open" then
-			return true
+			count += 1
 		end
 	end
-	return false
+	return count
+end
+
+local function hasOpenBlocking(ledger: Ledger): boolean
+	return openBlockingCount(ledger) > 0
 end
 
 local function nextFindingId(ledger: Ledger): number
@@ -429,9 +530,12 @@ local function findingList(ledger: Ledger, status: FindingStatus, severity: Seve
 	return lines
 end
 
--- Reconcile the judge's typed output into the ledger: compact findings the
--- judge verified clean in a later pass into the resolved count, keep the rest,
--- and append the judge's new findings with fresh ids.
+-- Reconcile the judge's typed output into the ledger: a finding the judge
+-- verified resolved in a later pass is retained as a terminal one-line entry
+-- with status `fixed` (its fix commit preserved) and the resolved count still
+-- advances; `fixed` entries no longer participate in reconciliation, gate
+-- convergence, or appear in the open-findings summary. The judge's new
+-- findings are appended with fresh ids.
 local function applyFindings(ledger: Ledger, findings: Findings)
 	local resolved: { [string]: boolean } = {}
 	for _, rec in findings.priorFindingsStatus do
@@ -439,17 +543,12 @@ local function applyFindings(ledger: Ledger, findings: Findings)
 			resolved[rec.id] = true
 		end
 	end
-	local kept: { LedgerFinding } = {}
-	local compacted = 0
 	for _, finding in ledger.findings do
 		if finding.status == "open" and resolved[finding.id] then
-			compacted += 1
-		else
-			table.insert(kept, finding)
+			finding.status = "fixed"
+			ledger.resolvedCount += 1
 		end
 	end
-	ledger.findings = kept
-	ledger.resolvedCount += compacted
 
 	local nextId = nextFindingId(ledger)
 	for _, judgeFinding in findings.findings do
@@ -534,15 +633,134 @@ local function buildFixPrompt(prUrl: string, ledger: Ledger, header: string): st
 	return table.concat(lines, "\n")
 end
 
-local function buildVerdictPrompt(prUrl: string, ledger: Ledger, header: string): string
-	local deferred = findingList(ledger, "deferred")
-	local deferredText = if #deferred > 0 then table.concat(deferred, "\n") else "(none)"
-	return table.concat({
-		header .. `Post a comment on pull request {prUrl} with the final review verdict.`,
+-- Render one ledger finding as a one-line entry (the fixing commit, when
+-- present, travels with it).
+local function renderFinding(finding: LedgerFinding): string
+	local fix = if finding.fixCommit ~= nil and finding.fixCommit ~= "" then `, fix {finding.fixCommit}` else ""
+	return `- {finding.id} ({finding.severity}, family {finding.family}, validation {finding.validation}{fix}): {finding.title}`
+end
+
+-- The full ledger render handed to the reporter: every status group
+-- (including retained `fixed` entries), the intention, the family table, the
+-- iteration state, the discovery/last-reviewed commits, and the resolved
+-- count. The ledger is the durable whole-loop memory, so the report is fully
+-- derivable from it (plus the loop's iteration state, which lives outside the
+-- ledger).
+local function renderLedger(ledger: Ledger, iterations: number, cap: number): string
+	local lines: { string } = {
+		"### Intention",
+		ledger.intention,
 		"",
-		"Include a deferred findings list in the comment. The judge deferred these findings as important but outside the PR's intention:",
-		deferredText,
+		"### Loop state",
+		`- iterations: {iterations} of {cap}`,
+		`- discovery commit: {ledger.discoverySha}`,
+		`- last reviewed commit: {ledger.lastReviewedSha}`,
+		`- resolved count (all time): {ledger.resolvedCount}`,
+	}
+	if #ledger.families > 0 then
+		table.insert(lines, `- families: {table.concat(ledger.families, ", ")}`)
+	else
+		table.insert(lines, "- families: none")
+	end
+
+	local function group(label: string, predicate: (LedgerFinding) -> boolean)
+		table.insert(lines, "")
+		table.insert(lines, `### {label}`)
+		local count = 0
+		for _, finding in ledger.findings do
+			if predicate(finding) then
+				table.insert(lines, renderFinding(finding))
+				count += 1
+			end
+		end
+		if count == 0 then
+			table.insert(lines, "(none)")
+		end
+	end
+	group("Open blocking", function(f: LedgerFinding): boolean
+		return f.status == "open" and f.severity == "blocking"
+	end)
+	group("Open non-blocking", function(f: LedgerFinding): boolean
+		return f.status == "open" and f.severity == "non-blocking"
+	end)
+	group("Findings resolved (fixed)", function(f: LedgerFinding): boolean
+		return f.status == "fixed"
+	end)
+	group("Deferred", function(f: LedgerFinding): boolean
+		return f.status == "deferred"
+	end)
+	group("Accepted", function(f: LedgerFinding): boolean
+		return f.status == "accepted"
+	end)
+	return table.concat(lines, "\n")
+end
+
+-- The section contract the reporter authors the body under. The playbook
+-- prepends the deterministic status line, so the reporter is told not to
+-- write one. The *Findings resolved* list is capped while the ledger keeps
+-- every entry.
+local function sectionContract(status: "converged" | "non-converged"): string
+	local lines: { string } = {
+		"Author the report body under exactly these sections, in this order:",
+	}
+	if status == "non-converged" then
+		table.insert(lines, "- Open blocking: every open blocking finding, most important first.")
+	end
+	table.insert(lines, "- What this PR does: the PR's intention in a short paragraph.")
+	table.insert(
+		lines,
+		`- Findings resolved: one line per resolved finding, most recent first. List at most the {RESOLVED_LIST_CAP} most recent entries; when more resolved entries exist, append a final line reading "…and N earlier omitted", where N is the number not listed.`
+	)
+	table.insert(lines, "- Open non-blocking: one line per open non-blocking finding, with its ledger id and title.")
+	table.insert(lines, "- Deferred: one line per deferred finding, noting it is important but outside the PR's intention.")
+	table.insert(lines, "- Accepted: one line per accepted finding.")
+	table.insert(
+		lines,
+		"- Loop summary: the iteration count, the discovery and last-reviewed commits, and the family table."
+	)
+	table.insert(lines, "- Do not add a status line; the playbook prepends one.")
+	return table.concat(lines, "\n")
+end
+
+-- The reporter prompt: the full ledger render, the terminal status, the last
+-- review pass's prose (or an explicit no-prose marker when the operation ran
+-- no review pass), and the section contract.
+local function buildReporterPrompt(
+	prUrl: string,
+	ledger: Ledger,
+	status: "converged" | "non-converged",
+	prose: string?,
+	iterations: number,
+	cap: number
+): string
+	local proseSection: string
+	if prose ~= nil and prose ~= "" then
+		proseSection = prose
+	else
+		proseSection = "(no review prose for this run: render the report from the ledger alone)"
+	end
+	return table.concat({
+		`Write the PR review report body for {prUrl}.`,
+		"",
+		`The loop's terminal status is {status}.`,
+		"",
+		"## Full ledger",
+		renderLedger(ledger, iterations, cap),
+		"",
+		"## Last review pass prose",
+		proseSection,
+		"",
+		"## Section contract",
+		sectionContract(status),
 	}, "\n")
+end
+
+-- The deterministic status line: composed by the playbook from the ledger so
+-- the report's convergence claim is never agent-authored.
+local function statusLine(status: "converged" | "non-converged", ledger: Ledger): string
+	local open = openBlockingCount(ledger)
+	local noun = if open == 1 then "finding" else "findings"
+	return `**PR review report — {status}** ({open} open blocking {noun})`
 end
 
 local function anyNeedsHuman(findings: Findings): boolean
@@ -583,6 +801,32 @@ local function runJudge(
 	error(`pr-review judge {sessionId} never submitted typed findings after {DEFAULT_JUDGE_ATTEMPTS} attempts`)
 end
 
+-- ---------------------------------------------------------------------------
+-- Reporter session (typed resultSchema, bounded retry)
+-- ---------------------------------------------------------------------------
+
+local function runReporter(
+	reporterAgent: Agent,
+	sessionId: string,
+	reporterSessionConfig: { sessionConfig.Entry }?,
+	prompt: string
+): string
+	for attempt = 1, DEFAULT_REPORTER_ATTEMPTS do
+		local session: Session = reporterAgent:session({ id = sessionId, resultSchema = REPORT_SCHEMA })
+		sessionConfig.apply(session, reporterSessionConfig)
+		local result = session:prompt(prompt)
+		local typed = result.result :: Report?
+		session:close()
+		if typed ~= nil then
+			return typed.report
+		end
+		ptah.log(
+			`pr-review reporter {sessionId} submitted no typed report (attempt {attempt}/{DEFAULT_REPORTER_ATTEMPTS})`
+		)
+	end
+	error(`pr-review reporter {sessionId} never submitted a typed report after {DEFAULT_REPORTER_ATTEMPTS} attempts`)
+end
+
 local M = {}
 
 function M.new(config: Config): Instance
@@ -590,6 +834,7 @@ function M.new(config: Config): Instance
 	local dryRun = config.dryRun == true
 	local work: Agent = config.agent
 	local judgeAgent: Agent = config.judgeAgent
+	local reporterAgent: Agent = config.reporterAgent
 
 	local instance: Instance = {
 		review = function(_self: Instance, prUrl: string): Outcome
@@ -646,25 +891,51 @@ function M.new(config: Config): Instance
 				persist()
 			end
 
-			-- The converged work session posts the verdict comment, including
-			-- the deferred findings list. A resume-converge has no new review
-			-- prose, so the posted comment text is the verdict.
-			local function converge(session: Session, header: string, verdict: string): Outcome
-				local posted = session:prompt(buildVerdictPrompt(prUrl, ledger, header))
-				session:close()
+			-- Loop progress, declared before the report step so `finish` and
+			-- `converge` can close over it: the count of completed units. A
+			-- review pass that just ran is `iteration + 1`; a resume that runs no
+			-- pass reports 0.
+			local iteration = 0
+
+			-- The single terminal report step: every returning outcome routes
+			-- through it, after the ledger is persisted and the review session
+			-- (if any) is closed. The reporter authors the body, the playbook
+			-- prepends the deterministic status line and posts the marked
+			-- comment, and the posted text is the outcome's report.
+			local function finish(
+				status: "converged" | "non-converged",
+				verdictText: string,
+				prose: string?,
+				iterations: number
+			): Outcome
 				persist()
-				local finalVerdict = if verdict ~= "" then verdict else posted.text
-				return { status = "converged", verdict = finalVerdict, ledger = ledger }
+				local body = runReporter(
+					reporterAgent,
+					"pr-review-reporter",
+					config.reporterSessionConfig,
+					buildReporterPrompt(prUrl, ledger, status, prose, iterations, maxIterations)
+				)
+				local posted = statusLine(status, ledger) .. "\n\n" .. body
+				postReport(prUrl, posted)
+				return { status = status, verdict = verdictText, ledger = ledger, report = posted }
+			end
+
+			-- Convergence closes the review session, then reports. The converged
+			-- work session no longer posts anything.
+			local function converge(session: Session, verdict: string): Outcome
+				session:close()
+				return finish("converged", verdict, verdict, iteration + 1)
 			end
 
 			-- Resume fast paths: no ledger means discovery; an existing ledger
 			-- with open blocking findings drives a fix turn; a clean ledger at
 			-- the current head converges immediately.
-			local iteration = 0
 			if not discovery then
 				if hasOpenBlocking(ledger) then
 					if iteration >= maxIterations - 1 then
-						return { status = "non-converged", verdict = "", ledger = ledger }
+						-- Resumed ledger already at the cap: no review pass runs,
+						-- so the report is rendered from the ledger alone.
+						return finish("non-converged", "", nil, 0)
 					end
 					local header = `[pr-review iteration {iteration + 1} of {maxIterations}]\n`
 					local session: Session = work:session({ id = `pr-review:{iteration}` })
@@ -677,10 +948,9 @@ function M.new(config: Config): Instance
 					session:close()
 					iteration += 1
 				elseif ledger.lastReviewedSha == fetchHeadSha(prUrl) then
-					local header = `[pr-review iteration {iteration + 1} of {maxIterations}]\n`
-					local session: Session = work:session({ id = `pr-review:converge` })
-					sessionConfig.apply(session, config.sessionConfig)
-					return converge(session, header, "")
+					-- Clean ledger at the current head: no work session runs; the
+					-- report goes straight to the reporter (no review prose).
+					return finish("converged", "", nil, 0)
 				end
 			end
 
@@ -710,14 +980,14 @@ function M.new(config: Config): Instance
 				persist()
 
 				if not hasOpenBlocking(ledger) then
-					return converge(session, header, verdict)
+					return converge(session, verdict)
 				end
 
 				-- The cap forbids a fix on the final unit: end non-converged
 				-- rather than push a fix no review will follow.
 				if iteration >= maxIterations - 1 then
 					session:close()
-					return { status = "non-converged", verdict = verdict, ledger = ledger }
+					return finish("non-converged", verdict, verdict, iteration + 1)
 				end
 
 				if anyNeedsHuman(findings) then
@@ -765,7 +1035,7 @@ function M.new(config: Config): Instance
 					iteration += 1
 				end
 			end
-			return { status = "non-converged", verdict = verdict, ledger = ledger }
+			return finish("non-converged", verdict, if verdict ~= "" then verdict else nil, iteration)
 		end,
 	}
 	return instance

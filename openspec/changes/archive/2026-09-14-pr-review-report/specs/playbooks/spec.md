@@ -72,8 +72,8 @@ the consumer's `setConfig` order.
 
 The `review` operation SHALL return a typed outcome carrying a status
 (`converged` / `non-converged`), the final verdict text, the final ledger snapshot,
-and the report text — outcomes as data, matching the library's transport conventions
-— rather than a bare verdict string. Escalation failures do not appear in the
+and the posted report text (`report`) — outcomes as data, matching the library's
+transport conventions — rather than a bare verdict string. Escalation failures do not appear in the
 outcome: an aborted or unservable ask fails the operation with an error, and an
 answered ask continues the loop toward convergence, so the returned status is always
 `converged` or `non-converged`.
@@ -224,7 +224,7 @@ comment limit fails loudly through the transport rather than truncating.
 #### Scenario: Resolved findings compact
 
 - **WHEN** a finding's fix has been verified clean in a later review pass
-- **THEN** the ledger compacts the finding to a terminal one-line entry with status `fixed` (id, title, family, fixing commit) rather than dropping it to a bare count, increments the resolved count, and no longer treats it as open — so the PR review report can list what was fixed
+- **THEN** the ledger retains the finding as a terminal one-line entry with status `fixed` (id, title, family, fixing commit) rather than dropping it to a bare count, increments the resolved count, and no longer treats it as open — so the PR review report can list what was fixed
 
 #### Scenario: One loop per PR is a documented requirement
 
@@ -262,12 +262,15 @@ entries; the open non-blocking findings; the deferred findings; the accepted fin
 and a loop summary (iterations, discovery and last-reviewed SHAs, and the family
 table). For a non-converged outcome the report SHALL lead with an open blocking
 findings section beneath the status line. The resolved findings list SHALL be capped
-at a documented maximum with a note of how many earlier entries are omitted, so the
-report stays readable while the ledger retains every entry.
+at 50 entries with a note of how many earlier entries are omitted, so the report stays
+readable while the ledger retains every entry.
 
-The reporter session SHALL receive the full ledger, the terminal status, the last
-review pass's prose, and the required section contract, so the report reflects the
-whole loop rather than the last delta alone.
+The reporter session SHALL receive the full ledger, the terminal status, and the
+required section contract, so the report reflects the whole loop rather than the last
+delta alone. It SHALL additionally receive the last review pass's prose when a review
+pass ran in the current operation; a resume that converges immediately, or that ends
+at the cap without a new review pass, has none, and the report is rendered from the
+ledger alone. The ledger is the durable whole-loop source; the prose is supplementary.
 
 #### Scenario: Report produced on convergence
 
@@ -296,8 +299,13 @@ whole loop rather than the last delta alone.
 
 #### Scenario: Reporter receives the full ledger and the last review prose
 
-- **WHEN** the playbook prompts the reporter
+- **WHEN** the playbook prompts the reporter after a review pass ran in the current operation
 - **THEN** the prompt carries the full ledger (including retained `fixed` entries), the terminal status, the last review pass's prose, and the section contract
+
+#### Scenario: Reporter runs without prose on a resume
+
+- **WHEN** a `review` operation returns without running a new review pass — an immediate resume converge, or a resumed ledger already at the cap — and a report is produced
+- **THEN** the reporter prompt carries the full ledger, the terminal status, and the section contract with an explicit no-prose marker instead of review prose, and the operation still returns `outcome.report`
 
 #### Scenario: Reporter session config is applied
 
@@ -306,5 +314,5 @@ whole loop rather than the last delta alone.
 
 #### Scenario: Resolved list is capped
 
-- **WHEN** the ledger holds more retained `fixed` entries than the report's documented maximum
-- **THEN** the report's resolved section lists the maximum and notes how many earlier entries are omitted, while the ledger continues to retain every entry
+- **WHEN** the ledger holds more than 50 retained `fixed` entries
+- **THEN** the report's resolved section lists 50 and notes how many earlier entries are omitted, while the ledger continues to retain every entry

@@ -84,11 +84,16 @@ without re-reading the PR; `outcome.verdict` keeps its current meaning.
 **D7 — Reporter context and the section contract.** The reporter prompt carries a full
 ledger render (all findings grouped by status, including retained `fixed` entries,
 plus intention, families, SHAs, resolved count, iteration state), the terminal status,
-the last review pass's prose, and a required section list: *What this PR does*,
-*Findings resolved*, *Open non-blocking*, *Deferred*, *Accepted*, *Loop summary*. For
-a non-converged outcome the open blocking findings are a section as well, and the
-status line leads. The resolved section is capped at a documented maximum (50) with an
-"…and N earlier omitted" note; the ledger retains every entry. *Alternative:* hand the
+the last review pass's prose (optional — see below), and a required section list:
+*What this PR does*, *Findings resolved*, *Open non-blocking*, *Deferred*, *Accepted*,
+*Loop summary*. For a non-converged outcome the open blocking findings are a section
+as well, and the status line leads. The prose is supplementary, not load-bearing: the
+ledger is the durable whole-loop memory and every required section is ledger-derivable.
+A resume that converges immediately, or that ends at the cap without a new review pass,
+has no prose to hand over, so the prompt carries an explicit no-prose marker and the
+report is rendered from the ledger alone. The section contract caps the *Findings resolved*
+list at the 50 most recent entries with an "…and N earlier omitted" note; the ledger
+retains every entry. *Alternative:* hand the
 reporter the raw JSON — rejected: it invites ledger-shaped output rather than a report.
 
 **D8 — Reporter exhaustion raises.** After the bounded retries, the operation fails
@@ -133,7 +138,8 @@ old one; no ADR is warranted (reversible, and the rationale lives in this change
    `outcome.report`; the converged comment is replaced by the report.
 5. Offline test coverage stays out of scope here (the suite lives in the ptah
    repository); the new reporter schema, report transport, terminal-outcome coverage,
-   and `fixed` retention need ptah-side coverage, tracked by the ptah adoption change.
+   and `fixed` retention need ptah-side coverage, tracked alongside the library's
+   adoption in the ptah repository.
 6. Rollback: the previous playbook shape remains at the prior tag; consumers pin it.
 
 ## Open Questions

@@ -10,7 +10,7 @@ The pr-review-loop's only human-facing comment is posted by the converged work s
 - **BREAKING**: the converged work session no longer posts a comment — the "verdict comment" artifact is removed. The immediate-converge `pr-review:converge` work session (whose only job was posting) is removed.
 - **BREAKING**: config gains a required `reporterAgent` handle and an optional `reporterSessionConfig`. A consumer that does not configure a reporter now fails `ptah check`.
 - The ledger retains resolved findings as **one-line entries** (`id`, `title`, `family`, `fixCommit`) instead of collapsing them to a bare resolved count, so the report can list what was fixed. The resolved count is still tracked; the report caps its resolved list with an "…and N earlier" note while the ledger retains all entries.
-- `outcome.report` is added (the report body); `outcome.verdict` keeps its current meaning (the final verdict text).
+- `outcome.report` is added (the posted report text: status line plus body); `outcome.verdict` keeps its current meaning (the final verdict text).
 - The artifact and its vocabulary are renamed: **PR review report** replaces "verdict comment".
 
 ## Capabilities
