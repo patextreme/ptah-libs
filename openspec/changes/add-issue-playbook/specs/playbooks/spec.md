@@ -77,8 +77,9 @@ A claim SHALL be a dedicated issue comment carrying the
 `<!-- ptah:issue-claim -->` marker and no protocol fields; the posting gh
 account and the comment's platform timestamps carry identity and order.
 An optional configured `claimedLabel` SHALL be added on claim for
-human-legible queue state; the queue label SHALL NOT be removed by the
-playbook (it is the human's readiness assertion).
+human-legible queue state and, when configured, SHALL filter issues
+carrying it out of the scan's list response; the queue label SHALL NOT
+be removed by the playbook (it is the human's readiness assertion).
 
 Because multiple runners may scan one queue and GitHub offers no atomic
 test-and-set, a claim SHALL be verified by reading the claims back after
@@ -89,13 +90,15 @@ further to the issue and proceed to the next eligible issue (a scan) or
 raise a lost-claim error (an explicit number).
 
 There SHALL be no release protocol: a claim is audit trail, retired
-naturally when the issue closes, and a stale claim is cleared by a human
-deleting the issue's claim comments (all of them — a contended issue
-carries the losing runner's comment too), which returns the issue to
-eligibility. Removing the claimed label alone SHALL NOT re-queue an
-issue: both the eligibility pre-check and the earliest-claim read-back
-key on the claim comments, never the label (and no label exists to
-remove when `claimedLabel` is unconfigured).
+naturally when the issue closes. A stale claim SHALL be cleared by a
+human deleting the issue's claim comments (all of them — a contended
+issue carries the losing runner's comment too) and removing the
+claimedLabel when it is on the issue; when `claimedLabel` is
+unconfigured, comment deletion is the whole procedure. Neither step
+alone SHALL re-queue an issue: the eligibility pre-check and the
+earliest-claim read-back key on the claim comments, and, when
+`claimedLabel` is configured, the scan filters issues carrying it out
+of the list response before the pre-check ever runs.
 
 #### Scenario: Earliest claim wins under contention
 
@@ -112,10 +115,10 @@ remove when `claimedLabel` is unconfigured).
 - **WHEN** a claim succeeds and a claimedLabel is configured
 - **THEN** the claimedLabel is added and the queue label remains on the issue
 
-#### Scenario: A stale claim is cleared at the source of truth
+#### Scenario: A stale claim is cleared by clearing both keys
 
-- **WHEN** a human deletes the claim comments on a stale-claimed issue that carries the queue label
-- **THEN** the issue is eligible again and the next scan can claim it, while removing the claimed label alone would leave the issue ineligible
+- **WHEN** a human deletes the claim comments on a stale-claimed issue that carries the queue label and removes the claimedLabel when it is on the issue
+- **THEN** the issue is eligible again and the next scan can claim it, while deleting the comments alone (a configured claimedLabel still on the issue keeps it out of the scan) or removing the label alone (the surviving claim markers still fail the pre-check) would leave the issue ineligible
 
 ### Requirement: Pickup brief
 

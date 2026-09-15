@@ -53,11 +53,13 @@ config.
   truth.** When configured, the scan filters claimed issues from the
   single `gh issue list --json` response (labels arrive in the query);
   when absent, the pre-check comment read does the work. The human's
-  stale-claim lever lives at the source of truth: deleting the issue's
-  claim comments (all of them — a contended issue carries the losing
-  runner's comment too) re-queues the issue; removing the label alone
-  does not, because the pre-check and the read-back key on the comments,
-  never the label.
+  stale-claim lever therefore clears both keys: delete the issue's claim
+  comments (all of them — a contended issue carries the losing runner's
+  comment too) and remove the claimed label when it is on the issue.
+  Neither half alone re-queues — comment deletion leaves a configured
+  label filtering the issue out of the scan, label removal leaves the
+  pre-check failing on the surviving markers — and when `claimedLabel`
+  is unconfigured, comment deletion is the whole procedure.
 - **Deterministic ordering client-side.** `gh issue list` ordering is
   gh's business; the playbook sorts eligible issues by number ascending
   itself so "oldest first" is exact and stable.
@@ -72,9 +74,10 @@ config.
 - [Same-second claim comments make `createdAt` ambiguous] → comment id
   (monotonic) is the tie-break; the protocol stays deterministic.
 - [A dead runner's claim blocks an issue forever] → accepted (explored
-  and chosen): a human deletes the issue's claim comments to re-queue
-  it (ADR 0002) — the deliberate override of the audit-trail claim, and
-  the only lever that works whether or not `claimedLabel` is configured.
+  and chosen): a human re-queues it by deleting the issue's claim
+  comments and removing the claimedLabel when it is present (ADR 0002)
+  — the deliberate override of the audit-trail claim, a fixed two-step
+  procedure that works whether or not `claimedLabel` is configured.
   Reclaim automation is deferred with ADR 0002.
 - [Rate limits from comment reads on large queues] → one list query +
   per-candidate reads only as attempts proceed (oldest first), so a
