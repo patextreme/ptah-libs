@@ -36,7 +36,7 @@ local ops = libs.openspec.new({
 ops:groom("add-auth")
 
 -- also available:
--- libs.prReviewLoop.new({ ... })
+-- libs.pr.new({ ... })
 -- libs.std.predicate.new({ ... })
 -- libs.std.gh.run({ ... })
 -- libs.std.daemon.run({ ... })
@@ -54,7 +54,7 @@ ops:groom("add-auth")
 | `std.daemon` | repo loop skeleton with per-repo error isolation |
 | `std.sessionConfig` | ordered session-config entries — the shared apply mechanism |
 | `openspec` | openspec change playbook (groom, implement, verify) |
-| `prReviewLoop` | convergent PR review loop (typed judge + PR-comment ledger) |
+| `pr` | convergent PR review loop (typed judge + PR-comment ledger) |
 
 Playbooks are constructed with `new(config)`; per-call data (a change name,
 a PR URL) is a method argument. See [The playbook
@@ -136,7 +136,7 @@ conventions](#loop-conventions), and [Session config](#session-config) below.
   `init.luau` module's relative requires resolve one directory off under
   luau-lsp.)
   - `openspec/` — groom, implement, and verify an openspec change.
-  - `pr-review-loop/` — convergent review→validate→fix→verify loop
+  - `pr/` — convergent review→validate→fix→verify loop
     against a pull request (typed judge, PR-comment ledger; ships the
     built-in persona and the component-owned protocol fragment).
 - `pesde.toml` — package manifest (`luau` target, `lib = "lib.luau"`).
@@ -169,7 +169,7 @@ loops share these conventions, documented here so drift stays visible:
 - Sessions: per-iteration work sessions are `<prefix>:<n>` and judge
   sessions `<prefix>-judge:<n>`; a loop that probes for human input
   before asking (openspec) uses escalation-judge sessions
-  `<prefix>-escalate-judge:<n>`, while the pr-review-loop's judge is itself the
+  `<prefix>-escalate-judge:<n>`, while the `pr` playbook's judge is itself the
   escalation trigger and creates no probe session.
 - Every prompt of a loop is prefixed `[<prefix> iteration N of M]` so
   the agent (and the logs) can see the loop state.
@@ -183,14 +183,14 @@ loops share these conventions, documented here so drift stays visible:
   (`<prefix> <change or PR URL>: human input required (iteration N of
   M)`); its details carry the work session's label and the **full**
   trigger payload, untruncated — the probe text for a probing loop, the
-  full review prose for the pr-review-loop's judge-flagged escalation —
+  full review prose for the `pr` playbook's judge-flagged escalation —
   so the human must be able to answer.
 - Failure wording: the human refused the ask — `<prefix>: human
   aborted escalation (iteration N of M)`; no provider served the ask —
   each playbook's pre-ask wording, byte-identical (e.g. `pr-review:
   human input is required to resolve the findings (iteration N of
   M)`), so provider-less consumers see zero drift; the cap —
-  `<prefix>: did not converge within M iterations` (the pr-review-loop
+  `<prefix>: did not converge within M iterations` (the `pr` playbook
   instead returns a non-converged typed outcome at its cap, since
   outcomes-as-data is its contract).
 

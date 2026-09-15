@@ -1,4 +1,4 @@
-# pr-review-loop playbook
+# pr playbook
 
 Run a convergent review→validate→fix→verify loop against a pull request:
 an agent reviews the PR freely in prose following a reviewer persona, a
@@ -187,9 +187,9 @@ the PR; `outcome.verdict` keeps its meaning (the final review verdict text).
 ## Config (data plus declared agent handles)
 
 ```lua
-local prReview = require("./luau_packages/ptah_libs").prReviewLoop
+local pr = require("./luau_packages/ptah_libs").pr
 
-local loop = prReview.new({
+local loop = pr.new({
 	agent = ptah.agent("claude"),         -- work agent handle
 	judgeAgent = ptah.agent("claude"),    -- required judge agent handle
 	reporterAgent = ptah.agent("claude"), -- required reporter agent handle
@@ -323,3 +323,21 @@ This is a breaking reshape. Every breaking item in the change proposal:
 
 The previous playbook shape remains at the prior tag; consumers pin it to
 roll back.
+
+## Migration notes (export rename to `pr`)
+
+This is a breaking reshape. Every breaking item in the change proposal:
+
+- **The library export `prReviewLoop` becomes `pr`.** The single consumer
+  edit is in the shim: `require("./luau_packages/ptah_libs").prReviewLoop` →
+  `require("./luau_packages/ptah_libs").pr` (rename the local/field with it).
+- **The playbook directory `playbooks/pr-review-loop/` becomes
+  `playbooks/pr/`.** Consumers require the generated shim, not a deep path,
+  so the directory rename needs no consumer edit.
+- **Persisted wire and wording are frozen.** The ledger/report markers
+  (`<!-- ptah:pr-review-ledger -->`, `<!-- ptah:pr-review-report -->`), the
+  `pr-review:` error/ask prefixes, and the session-id prefixes stay
+  byte-stable — in-flight ledgers and existing PR comments are not orphaned.
+
+The previous export name remains at the prior tag; consumers pin it to defer
+the break.

@@ -20,7 +20,8 @@ _Avoid_: utils, lib, common
 
 **Playbook**:
 A reusable workflow capability that consumers compose and configure rather
-than fork — e.g. an openspec lifecycle or a PR review loop.
+than fork, named for the entity it manages — an issue, a PR, an openspec
+change — with its operations as that entity's verbs.
 _Avoid_: Component (the unit's former name), template, plugin, module
 (module means any Luau file)
 
@@ -76,6 +77,30 @@ comment (edited in place across runs) on every terminal outcome that returns.
 Authored by a dedicated reporter agent under a fixed section contract, with a
 deterministic status line prepended by the playbook from the ledger.
 _Avoid_: verdict comment (the retired name), summary comment, review summary
+
+**Queue label**:
+The repo-configured label that places an issue into the pickup queue — a
+human's assertion that the issue is ready for development. The mechanism
+is the playbook's; the word is the repo's.
+_Avoid_: ai-r4d (one repo's instance), intake label, ready label
+
+**Claim**:
+An agent's posted, persistent assertion that it has taken an issue for
+work. The earliest claim on an issue wins, verified by reading the claims
+back.
+_Avoid_: assignment (GitHub's own concept), lock, reservation
+
+**Escalated**:
+A triage classification meaning a human must look at the issue — persisted
+on the issue for asynchronous attention, never an interactive ask.
+_Avoid_: escalation (the runtime ask mechanism — a different concept),
+needs-info, blocked
+
+**Brief**:
+The typed record a pickup returns — the claimed issue's identity, title,
+and body plus its claim reference — from which the consumer's script
+drives the work.
+_Avoid_: handoff, ticket, snapshot
 
 **ptah_libs**:
 This repository as a pesde package (`patextreme/ptah_libs`, `luau`
