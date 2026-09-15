@@ -28,7 +28,8 @@ needs later.
 - The playbook is agent-free: no work sessions, no judge, no
   session-config, no ask. The claim protocol is pure `gh` transport.
 - No release protocol: a claim is audit trail, retired when the issue
-  closes; a human clears a stale claim by removing the claimed label.
+  closes; a human clears a stale claim by deleting the issue's claim
+  comments (removing the claimed label alone re-queues nothing — ADR 0002).
 - Triage is explicitly out of scope (deferred until real usage shapes
   it), as are reclaim, run ids, and orchestration to a reviewed PR.
 

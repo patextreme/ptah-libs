@@ -21,6 +21,11 @@ be part of the supported consumer surface.
 - **WHEN** a consumer requires the generated dependency shim
 - **THEN** `std.predicate`, `std.gh`, `std.daemon`, `std.sessionConfig`, `std.escalate`, `openspec`, `pr`, and `issue` are available on the returned table
 
+#### Scenario: The renamed export replaces the former name
+
+- **WHEN** a consumer requires the generated dependency shim
+- **THEN** `prReviewLoop` is not available on the returned table (the rename is a clean break; consumers pin the prior tag to defer it)
+
 ## ADDED Requirements
 
 ### Requirement: Issue pickup playbook
@@ -85,7 +90,12 @@ raise a lost-claim error (an explicit number).
 
 There SHALL be no release protocol: a claim is audit trail, retired
 naturally when the issue closes, and a stale claim is cleared by a human
-removing the claimed label, which returns the issue to eligibility.
+deleting the issue's claim comments (all of them — a contended issue
+carries the losing runner's comment too), which returns the issue to
+eligibility. Removing the claimed label alone SHALL NOT re-queue an
+issue: both the eligibility pre-check and the earliest-claim read-back
+key on the claim comments, never the label (and no label exists to
+remove when `claimedLabel` is unconfigured).
 
 #### Scenario: Earliest claim wins under contention
 
@@ -101,6 +111,11 @@ removing the claimed label, which returns the issue to eligibility.
 
 - **WHEN** a claim succeeds and a claimedLabel is configured
 - **THEN** the claimedLabel is added and the queue label remains on the issue
+
+#### Scenario: A stale claim is cleared at the source of truth
+
+- **WHEN** a human deletes the claim comments on a stale-claimed issue that carries the queue label
+- **THEN** the issue is eligible again and the next scan can claim it, while removing the claimed label alone would leave the issue ineligible
 
 ### Requirement: Pickup brief
 

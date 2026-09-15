@@ -11,10 +11,14 @@ eligible issue. The optional label transition
 is a human-legible filter, never the source of truth (label edits race).
 There is no release protocol: a claim is audit trail, retired naturally
 when the issue closes. Reclaim stays deferred even though concurrency is
-real — a human clears a stale claim by removing the claimed label, which
-returns the issue to eligibility. ptah exposes no run id to scripts today
-(`.ptah/runs/` ids are storage-side only), and a claim's identity is the
-posting gh account, not the execution.
+real — a human clears a stale claim by deleting the issue's claim
+comments, all of them (a contended issue carries the losing runner's
+comment too): comment deletion is the deliberate override of the audit
+trail and the only lever that reaches the eligibility source of truth —
+removing the claimed label re-queues nothing, and no label exists to
+remove when `claimedLabel` is unconfigured. ptah exposes no run id to
+scripts today (`.ptah/runs/` ids are storage-side only), and a claim's
+identity is the posting gh account, not the execution.
 
 Rejected: gh assignees (no exclusivity — adding an assignee never fails),
 label-swap-only (a race window between list and edit), and branch
