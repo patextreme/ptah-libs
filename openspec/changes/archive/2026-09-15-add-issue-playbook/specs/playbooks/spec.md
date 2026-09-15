@@ -38,14 +38,20 @@ The playbook SHALL NOT configure agents, judges, session-config entries,
 or asks — pickup is pure GitHub CLI transport (the `gh` CLI on the
 agent's PATH with credentials is a declared environment requirement).
 
-Eligibility SHALL be computed from issue data only: the queue label is
-present and the issue is not already claimed. The playbook SHALL order
-eligible issues oldest-first by issue number, deterministically.
+Eligibility SHALL consider only two signals: the queue label is present
+and the issue carries no claim marker comment. No triage verdict or
+other signal SHALL affect eligibility. The scan SHALL consider every
+issue carrying the queue label, not only a fixed-size first page, and
+the playbook SHALL order eligible issues oldest-first by issue number,
+deterministically, regardless of queue size.
 
 The `pickUp` operation SHALL accept either no argument (scan and claim
 the oldest eligible issue) or an issue number (claim that issue only if
-eligible). A scan that finds no eligible issue SHALL return a distinct
-no-eligible-issue outcome rather than raising.
+eligible). The operation SHALL return a typed outcome discriminated on
+`status`: `claimed` carrying the pickup brief, or `no-eligible-issue`
+carrying the scan summary (the count of issues scanned). A scan that
+finds no eligible issue SHALL return the `no-eligible-issue` outcome
+rather than raising.
 
 When no eligible issue exists for a requested issue number, the operation
 SHALL raise an error stating the reason (missing queue label or already
@@ -59,7 +65,12 @@ claimed).
 #### Scenario: Oldest eligible issue is picked up
 
 - **WHEN** `pickUp` is called with no argument and the queue holds issues 12 and 7 carrying the queue label, neither claimed
-- **THEN** issue 7 is claimed and its brief is returned
+- **THEN** issue 7 is claimed and the `claimed` outcome carrying its brief is returned
+
+#### Scenario: Oldest-first spans the whole queue
+
+- **WHEN** `pickUp` is called with no argument against a queue larger than one page where an older labeled issue carries a claim marker (e.g. issue 3 claimed) and a newer unclaimed labelled issue follows past the page boundary (e.g. issue 40)
+- **THEN** the oldest *eligible* issue is claimed, proving the scan reads the whole queue and skips claimed issues rather than only the first page
 
 #### Scenario: No eligible issue returns a distinct outcome
 
@@ -76,34 +87,35 @@ claimed).
 A claim SHALL be a dedicated issue comment carrying the
 `<!-- ptah:issue-claim -->` marker and no protocol fields; the posting gh
 account and the comment's platform timestamps carry identity and order.
-An optional configured `claimedLabel` SHALL be added on claim for
-human-legible queue state and, when configured, SHALL filter issues
-carrying it out of the scan's list response; the queue label SHALL NOT
-be removed by the playbook (it is the human's readiness assertion).
+The claim marker comment is the source of truth for claimedness. An
+optional configured `claimedLabel` SHALL be added on claim for
+human-legible queue state only — it SHALL NOT participate in
+eligibility, and the queue label SHALL NOT be removed by the playbook
+(it is the human's readiness assertion).
 
 Because multiple runners may scan one queue and GitHub offers no atomic
 test-and-set, a claim SHALL be verified by reading the claims back after
 posting: the winner is the earliest claim comment on the issue by the
-platform's creation timestamp, with comment id as tie-break. A runner
+platform's creation timestamp, with the comment's numeric
+platform id as tie-break — the lowest id wins, since ids increase
+monotonically with creation. A runner
 whose claim is not the earliest SHALL back off without writing anything
-further to the issue and proceed to the next eligible issue (a scan) or
-raise a lost-claim error (an explicit number).
+further to the issue — it SHALL NOT remove its own losing marker — and
+proceed to the next eligible issue (a scan) or raise a lost-claim error
+(an explicit number).
 
 There SHALL be no release protocol: a claim is audit trail, retired
-naturally when the issue closes. A stale claim SHALL be cleared by a
-human deleting the issue's claim comments (all of them — a contended
-issue carries the losing runner's comment too) and removing the
-claimedLabel when it is on the issue; when `claimedLabel` is
-unconfigured, comment deletion is the whole procedure. Neither step
-alone SHALL re-queue an issue: the eligibility pre-check and the
-earliest-claim read-back key on the claim comments, and, when
-`claimedLabel` is configured, the scan filters issues carrying it out
-of the list response before the pre-check ever runs.
+naturally when the issue closes. A stale claim is cleared by a human
+deleting every claim marker comment on the issue, which returns the issue
+to eligibility; removing `claimedLabel` alone is cosmetic and SHALL NOT
+requeue the issue. Because a losing runner leaves its losing marker in
+place, a requeue means deleting all claim markers: an issue carrying only
+a losing marker (its winner's marker already deleted) remains ineligible.
 
 #### Scenario: Earliest claim wins under contention
 
 - **WHEN** two runners post claim comments on the same issue and both read the claims back
-- **THEN** the runner whose comment is earliest by platform creation timestamp (comment id as tie-break) proceeds with the brief, and the other backs off and moves on without further writes to the issue
+- **THEN** the runner whose comment is earliest by platform creation timestamp (on a tie, the lowest numeric comment id) proceeds with the brief, and the other backs off and moves on without further writes to the issue
 
 #### Scenario: Claimed issues are not re-claimed
 
@@ -115,17 +127,28 @@ of the list response before the pre-check ever runs.
 - **WHEN** a claim succeeds and a claimedLabel is configured
 - **THEN** the claimedLabel is added and the queue label remains on the issue
 
-#### Scenario: A stale claim is cleared by clearing both keys
+#### Scenario: Claimedness is the marker, not the label
 
-- **WHEN** a human deletes the claim comments on a stale-claimed issue that carries the queue label and removes the claimedLabel when it is on the issue
-- **THEN** the issue is eligible again and the next scan can claim it, while deleting the comments alone (a configured claimedLabel still on the issue keeps it out of the scan) or removing the label alone (the surviving claim markers still fail the pre-check) would leave the issue ineligible
+- **WHEN** an issue carrying a claim marker comment has its claimedLabel removed by a human but the marker comment remains
+- **THEN** the issue is still ineligible, because the label is cosmetic and the marker is the source of truth
+
+#### Scenario: Deleting every claim marker requeues
+
+- **WHEN** a human deletes every claim marker comment from an issue that still carries the queue label
+- **THEN** the issue becomes eligible again and a later scan can claim it
+
+#### Scenario: A losing marker alone still blocks eligibility
+
+- **WHEN** an issue carries a claim marker posted by a losing runner (its winner's marker already deleted) and still carries the queue label
+- **THEN** the issue remains ineligible until every claim marker comment is deleted
 
 ### Requirement: Pickup brief
 
-The `pickUp` operation SHALL return a typed brief carrying the claimed
-issue's number, url, title, body, and the claim comment's id — sufficient
-for the calling script to drive work without re-fetching the issue. The
-brief SHALL carry no agent-authored content and no triage verdict.
+The `claimed` outcome's `brief` SHALL carry the claimed issue's number,
+url, title, body, and the claim comment's numeric platform id —
+sufficient for the calling script to drive work without re-fetching the
+issue. The brief SHALL carry no agent-authored content and no triage
+verdict.
 
 #### Scenario: Brief carries the work-start data
 

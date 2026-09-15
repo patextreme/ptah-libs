@@ -15,9 +15,13 @@ module's internal `../../std/…` requires identically. See
 
 - `openspec/` — groom, implement, verify an openspec change
 - `pr/` — convergent review→validate→fix→verify loop on a pull request
+- `issue/` — agent-free issue pickup: scan a queue label and claim the
+  oldest eligible issue (earliest-claim marker protocol)
 
 Both convergence-loop playbooks escalate to a human through the
 stdlib's `escalate` transport when a judged pass cannot proceed — an
 answered ask resumes the loop, a refused or unservable ask fails the
 operation (see `../README.md` for the loop conventions and each
-playbook's README for its escalation behavior).
+playbook's README for its escalation behavior). The `issue` playbook is
+agent-free: it creates no sessions, ships no judge, and asks nothing —
+the claim protocol is pure `gh` transport.

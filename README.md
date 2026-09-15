@@ -37,6 +37,7 @@ ops:groom("add-auth")
 
 -- also available:
 -- libs.pr.new({ ... })
+-- libs.issue.new({ queueLabel = "ready-for-dev", claimedLabel = "in-progress" })
 -- libs.std.predicate.new({ ... })
 -- libs.std.gh.run({ ... })
 -- libs.std.daemon.run({ ... })
@@ -55,6 +56,7 @@ ops:groom("add-auth")
 | `std.sessionConfig` | ordered session-config entries — the shared apply mechanism |
 | `openspec` | openspec change playbook (groom, implement, verify) |
 | `pr` | convergent PR review loop (typed judge + PR-comment ledger) |
+| `issue` | agent-free issue pickup (queue-label scan + earliest-claim marker) |
 
 Playbooks are constructed with `new(config)`; per-call data (a change name,
 a PR URL) is a method argument. See [The playbook
@@ -139,6 +141,9 @@ conventions](#loop-conventions), and [Session config](#session-config) below.
   - `pr/` — convergent review→validate→fix→verify loop
     against a pull request (typed judge, PR-comment ledger; ships the
     built-in persona and the component-owned protocol fragment).
+  - `issue/` — agent-free pickup: scan a repo-configured queue label
+    and claim the oldest eligible issue with an earliest-wins marker
+    comment, returning a typed pickup brief.
 - `pesde.toml` — package manifest (`luau` target, `lib = "lib.luau"`).
 - `CONTEXT.md` — the library's vocabulary.
 

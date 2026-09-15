@@ -14,6 +14,7 @@ local sessionConfig = require("./std/session-config")
 local escalate = require("./std/escalate")
 local openspec = require("./playbooks/openspec/playbook")
 local pr = require("./playbooks/pr/playbook")
+local issue = require("./playbooks/issue/playbook")
 
 return {
 	std = {
@@ -25,4 +26,5 @@ return {
 	},
 	openspec = openspec,
 	pr = pr,
+	issue = issue,
 }
