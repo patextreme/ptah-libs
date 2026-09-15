@@ -21,8 +21,9 @@ it — so it belongs in the library, not in one consumer's branch.
   label lifecycle, bookkeeping) and never calls `ptah.agent`, `ptah.ask`, or
   `ptah.exit` literally, so it is safe to require from any consumer.
 - Add a new **`ciGate` playbook**: watch a PR's check rollup to completion and
-  hand failing logs to an agent for a bounded number of repair pushes,
-  returning a typed outcome (`green` / `unresolved`) instead of raising. This
+  hand failing logs to an agent for a bounded number of repair pushes (signed
+  with the configured `commitSignArgs`), returning a typed outcome (`green` /
+  `unresolved`) instead of raising. This
   is a separate capability because the pr-review-loop spec explicitly places
   CI outside that playbook, and a second consumer already duplicates it.
 - Add **`std.agent.inDirectory(agent, dir)`** — wrap an agent handle so every
@@ -34,22 +35,30 @@ it — so it belongs in the library, not in one consumer's branch.
   three private copies of the same helpers.
 - Add the new exports to the package entry: `std.agent`, `std.shell`,
   `issueWorker`, `ciGate`.
-- **Config becomes data**: `readyLabel`/`blockedLabel` (required — the library
-  bakes no repo's label), `baseBranch`, `branchPrefix`, `gateCommands`,
-  `commitSignArgs`, `openspec` (opt-in), a shared `repoBrief` string injected
-  into the built-in stage prompts, role handles (`agent`, `judgeAgent`,
-  `reporterAgent`) with `sessionConfig` / `judgeSessionConfig` /
-  `reporterSessionConfig`, and defaulted caps.
+- **Config becomes data**: required `readyLabel`/`blockedLabel` (the library
+  bakes no repo's label), `baseBranch`, `branchPrefix`, and `gateCommands`;
+  defaulted `worktreeDir` (`"tmp"`, which the consumer must gitignore),
+  `commitTypes`, `commitSignArgs`, caps, and `openspec` (opt-in); a shared
+  `repoBrief` string
+  injected into the built-in stage prompts; role handles (`agent`,
+  `judgeAgent`, `reporterAgent`) with `sessionConfig` / `judgeSessionConfig` /
+  `reporterSessionConfig`.
 - Add the glossary term **Meta playbook** to `CONTEXT.md` (a playbook that
   composes std, other playbooks, and deterministic stages over a whole unit of
   work) and update the *Package consumption* export list.
-- Replace lace's `.ptah/workflows/issue-worker/` (the ten modules) with a thin
-  shim that requires the package and supplies Local config. The dependency
-  stays pinned `rev = "main"`; `pesde.lock` records the resolved tree id.
 
-**Non-goals (deliberately deferred):** upstream offline coverage for the new
-playbooks (the ptah mock-agent suite) and the stale `README.md` note claiming
-no suite exists — both are follow-ups, so this change cuts no tag.
+**Non-goals (deliberately deferred):**
+
+- The `input-output-hk/lace-id-portal` migration. Lace's
+  `.ptah/workflows/issue-worker/` (the ten modules) collapses to a thin shim
+  that requires this package and supplies Local config, but that landing is a
+  **separate change gated on this library change merging to `main`**. Lace
+  stays pinned to `rev = "main"` (design D8); this change does not touch lace,
+  so it remains a single-repo, self-verifiable unit.
+- Upstream offline coverage for the new playbooks (the ptah mock-agent suite)
+  and the stale `README.md` note claiming no suite exists — both ship as a
+  **follow-up OpenSpec change created before this change is archived**, so
+  this change cuts no tag.
 
 ## Capabilities
 
@@ -75,9 +84,11 @@ no suite exists — both are follow-ups, so this change cuts no tag.
   `git.luau`, and `README.md` declaring environment requirements).
 - `playbooks/ci-gate/` — new playbook (`playbook.luau`, `README.md`).
 - `CONTEXT.md` — new term **Meta playbook**.
+- `README.md`, `std/README.md`, `playbooks/README.md` — export table, layout,
+  and module/playbook indexes.
 - `openspec/specs/playbooks/spec.md` — updated by the delta.
-- `input-output-hk/lace-id-portal` (branch `issue-worker`) —
-  `.ptah/workflows/issue-worker/` collapses to a shim; `.ptah/pesde.toml` /
-  `.ptah/pesde.lock` re-locked.
+- No consumer repository is modified by this change: the lace migration is a
+  separate landing (see Non-goals), so the library change is verifiable on its
+  own via `ptah check`.
 - No breaking change to existing consumers: the additions are new exports, and
   `std.gh`/`std.daemon`'s observable behavior is unchanged.

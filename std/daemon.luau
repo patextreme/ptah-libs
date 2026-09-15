@@ -5,6 +5,8 @@
 -- bounded-concurrency parallel via ptah.parallel when `concurrency` is
 -- set (>= 1).
 
+local shell = require("./shell")
+
 export type RepoOutcome = {
 	repo: string,
 	ok: boolean,
@@ -17,13 +19,6 @@ export type DaemonOptions = {
 	-- Absent: sequential.
 	concurrency: number?,
 }
-
-local function errorMessage(value: any): string
-	if type(value) == "string" then
-		return value
-	end
-	return tostring(value)
-end
 
 local function each(repos: { string }, op: (repo: string) -> (), options: DaemonOptions?): { RepoOutcome }
 	local opts: DaemonOptions = if options ~= nil then options else {}
@@ -42,7 +37,7 @@ local function each(repos: { string }, op: (repo: string) -> (), options: Daemon
 			if entry.ok then
 				table.insert(outcomes, { repo = repo, ok = true, error = nil })
 			else
-				table.insert(outcomes, { repo = repo, ok = false, error = errorMessage(entry.error) })
+				table.insert(outcomes, { repo = repo, ok = false, error = shell.errorMessage(entry.error) })
 			end
 		end
 	else
@@ -51,7 +46,7 @@ local function each(repos: { string }, op: (repo: string) -> (), options: Daemon
 			if ok then
 				table.insert(outcomes, { repo = repo, ok = true, error = nil })
 			else
-				table.insert(outcomes, { repo = repo, ok = false, error = errorMessage(err) })
+				table.insert(outcomes, { repo = repo, ok = false, error = shell.errorMessage(err) })
 			end
 		end
 	end

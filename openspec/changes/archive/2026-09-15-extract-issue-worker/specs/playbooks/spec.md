@@ -91,13 +91,29 @@ The playbook's config SHALL be data plus declared agent handles, and SHALL
 NOT contain callable hooks. It SHALL accept the role handles `agent`,
 `judgeAgent`, and `reporterAgent`, and the ordered session-config arrays
 `sessionConfig`, `judgeSessionConfig`, and `reporterSessionConfig`, following
-the library's session-config convention. It SHALL accept the required repo
-shape `readyLabel` and `blockedLabel` (the library SHALL ship no default,
-encoding no repository's label), `baseBranch`, `branchPrefix`, and
-`worktreeDir`; the deterministic knobs `gateCommands`, `commitSignArgs`, and
-the caps (`pickupLimit`, `maxAttempts`, `reviewMaxIterations`, and the CI
-bounds); an opt-in `openspec` flag; and an optional `repoBrief` string.
-`repoBrief` SHALL be injected into the playbook's built-in stage prompts so
+the library's session-config convention. `agent` and `sessionConfig` SHALL
+drive the playbook's own stage sessions and be forwarded as the work agent
+handle and work session config to every nested playbook the run drives;
+`judgeAgent`/`judgeSessionConfig` SHALL be forwarded to the nested playbooks
+that require a judge (the openspec playbook and the PR review loop),
+`reporterAgent`/`reporterSessionConfig` to the nested PR review loop, and
+`commitSignArgs` to the CI gate.
+
+It SHALL accept the required repo shape `readyLabel` and `blockedLabel` (the
+library SHALL ship no default, encoding no repository's label), `baseBranch`,
+`branchPrefix`, and `gateCommands`; the defaulted `worktreeDir` (defaulting to
+`"tmp"` relative to the repository root, which the consumer is responsible for
+gitignoring), `commitTypes` (the conventional-commit vocabulary the triage
+verdict's commit type is drawn from), `commitSignArgs`, and caps (`pickupLimit`,
+`maxAttempts`, `reviewMaxIterations`, and the CI bounds); an opt-in `openspec`
+flag; and an optional `repoBrief` string. `pickupLimit` SHALL bound the candidate issues
+inspected while searching for an eligible one — a run still claims and
+processes at most one issue; `maxAttempts` SHALL bound the playbook's own
+typed-result retries (the triage verdict and the delivery session's
+pull-request URL); and `reviewMaxIterations` SHALL be forwarded to the nested
+PR review loop's iteration cap.
+`repoBrief` SHALL be injected into every playbook-authored stage prompt
+(triage, direct implementation, and delivery) so
 repository prose (a pointer to `AGENTS.md`, the environment it runs in, a
 merge-not-rebase policy) arrives as data while the prompts stay playbook-owned;
 its absence SHALL leave the built-in prompts otherwise unchanged.
@@ -107,9 +123,15 @@ when an issue is eligible, the whole lifecycle, returning the outcome;
 `pickup()`, which returns the claimed issue or nil; and `process(issue)`,
 which runs a claimed issue through to delivery or rejection and returns the
 outcome. The outcome SHALL be a typed discriminated record with status
-`delivered`, `rejected`, `idle`, or `failed`, carrying the issue, the pull
-request URL where one exists, and a reason on rejection or failure.
+`delivered`, `rejected`, `idle`, or `failed`, carrying the issue where one was
+claimed (nil on `idle`), the pull request URL where one exists, and a reason on
+rejection or failure.
 
+A run SHALL drive the nested PR review loop before the CI gate, and a CI repair
+push SHALL NOT re-run the review; when the CI gate returns `unresolved`, or the
+nested PR review loop returns a non-converged outcome, the playbook SHALL record
+the failure bookkeeping and return a `failed` outcome (carrying the review
+verdict for the latter), mirroring each other.
 The playbook SHALL own its bookkeeping and SHALL return a `failed` outcome
 after recording a stage failure rather than propagating the error; it SHALL
 NOT call `ptah.exit` or `ptah.ask` literally, and it SHALL NOT construct an
@@ -129,12 +151,27 @@ route and the playbook SHALL require no openspec environment.
 #### Scenario: Nothing to do
 
 - **WHEN** the playbook's `run` operation finds no eligible issue
-- **THEN** it returns an `idle` outcome and performs no repository mutation
+- **THEN** it returns an `idle` outcome and performs no issue or pull-request mutation
 
 #### Scenario: A stage failure is recorded, not propagated
 
 - **WHEN** a stage fails after an issue was claimed
 - **THEN** the playbook performs the failure bookkeeping and returns a `failed` outcome carrying the reason, and the shim — not the playbook — decides the exit code
+
+#### Scenario: Review precedes the CI gate
+
+- **WHEN** a run delivers a pull request
+- **THEN** the nested PR review loop runs before the CI gate, and a CI repair push does not re-run the review
+
+#### Scenario: Unresolved CI fails the run
+
+- **WHEN** the CI gate returns `unresolved`
+- **THEN** the playbook records the failure bookkeeping and returns a `failed` outcome
+
+#### Scenario: Non-converged review fails the run
+
+- **WHEN** the nested PR review loop returns a non-converged outcome
+- **THEN** the playbook records the failure bookkeeping and returns a `failed` outcome carrying the review verdict, and the CI gate is not run
 
 #### Scenario: Config is validated by the compatibility gate
 
@@ -191,8 +228,8 @@ run.
 
 #### Scenario: Claim lost to a concurrent run
 
-- **WHEN** assigning the authenticated user fails because another run claimed the issue
-- **THEN** the playbook skips that issue and continues with the next candidate
+- **WHEN** another run assigns itself between the eligibility read and this run's claim, so the re-read of the assignee set finds anything other than exactly the authenticated user
+- **THEN** the playbook removes its own assignment, skips that issue, and continues with the next candidate
 
 #### Scenario: Labels are created idempotently
 
@@ -205,11 +242,12 @@ The playbook SHALL run one triage session in the issue worktree that returns a
 typed verdict through the session's result: a route, a rationale, a
 conventional-commit type, and — on the openspec route — a change name. A
 verdict that is missing or invalid SHALL be retried a bounded number of times,
-and exhaustion SHALL fail the run. The route SHALL be `direct` or `reject`,
-and additionally `openspec` only when the openspec opt-in is enabled. On the
-openspec route the playbook SHALL require that the named change directory
-exists before driving the openspec playbook's groom, implement, and verify
-operations, and SHALL fail the run if it does not. On the direct route one
+and exhaustion SHALL record the failure bookkeeping and return a `failed`
+outcome. The route SHALL be `direct` or `reject`, and additionally `openspec`
+only when the openspec opt-in is enabled. On the openspec route the playbook
+SHALL require that the named change directory exists before driving the
+openspec playbook's groom, implement, and verify operations, and SHALL record
+the failure bookkeeping and return a `failed` outcome if it does not. On the direct route one
 session SHALL implement the issue in the worktree and commit the work with the
 configured signing arguments. On the reject route the playbook SHALL perform
 the blocked bookkeeping and return a `rejected` outcome without delivering.
@@ -217,7 +255,7 @@ the blocked bookkeeping and return a `rejected` outcome without delivering.
 #### Scenario: Invalid verdict is retried
 
 - **WHEN** the triage session submits no typed result, or a result missing a route, rationale, or commit type
-- **THEN** the playbook re-prompts up to the retry bound and fails the run if no valid verdict arrives
+- **THEN** the playbook re-prompts up to the retry bound and returns a `failed` outcome if no valid verdict arrives
 
 #### Scenario: Direct route implements and commits
 
@@ -232,7 +270,7 @@ the blocked bookkeeping and return a `rejected` outcome without delivering.
 #### Scenario: openspec route requires its change
 
 - **WHEN** triage returns the openspec route with a change name but the change directory does not exist in the worktree
-- **THEN** the run fails with an error naming the missing change
+- **THEN** the playbook records the failure bookkeeping and returns a `failed` outcome naming the missing change
 
 #### Scenario: openspec route drives the openspec playbook
 
@@ -245,14 +283,15 @@ The playbook SHALL deliver the issue branch through one session that runs the
 configured gate commands, brings the branch up to date with the base branch by
 merging — never rebasing, so signed commits are preserved — pushes the branch,
 and opens a pull request against the base branch whose body begins with the
-issue's closing reference and whose title is the configured
-conventional-commit type composed with the issue title. The session SHALL
+issue's closing reference and whose title is the triage verdict's
+conventional-commit type (drawn from the configured `commitTypes`) composed
+with the issue title. The session SHALL
 submit the pull request URL as a typed result, retried a bounded number of
 times. Before the pull request is handed onward, the playbook SHALL
 deterministically re-check that the branch has at least one commit ahead of
 the base branch, that the reported URL is a pull URL, and that the pull
 request's title matches the composed title — correcting the title through the
-transport and failing the run if it cannot be corrected.
+transport and returning a `failed` outcome if it cannot be corrected.
 
 #### Scenario: Delivery re-checks are deterministic
 
@@ -262,12 +301,12 @@ transport and failing the run if it cannot be corrected.
 #### Scenario: Branch with no commits ahead fails delivery
 
 - **WHEN** the delivered branch has no commits ahead of the base branch
-- **THEN** the run fails with an error naming the branch
+- **THEN** the playbook records the failure bookkeeping and returns a `failed` outcome naming the branch
 
 #### Scenario: Title is corrected or fails
 
 - **WHEN** the opened pull request's title differs from the composed conventional-commit title
-- **THEN** the playbook edits the title and fails the run if it still does not match
+- **THEN** the playbook edits the title and returns a `failed` outcome if it still does not match
 
 #### Scenario: No rebase
 
@@ -299,11 +338,16 @@ labels back.
 The library SHALL provide a `ciGate` playbook that watches a pull request's
 check rollup to a terminal state and, while failing checks remain and a repair
 budget remains, hands the failing run's logs to a configured agent for a
-signed repair push. It SHALL classify each rollup entry across the check-run
+repair push committed with the configured signing arguments. It SHALL classify
+each rollup entry across the check-run
 and status-context shapes and SHALL proceed only when every entry is
-successful or neutral. The playbook SHALL accept an `agent` handle, an ordered
-`sessionConfig` array, a wait budget, a poll interval, and a repair-attempt
-cap. Its `watch` operation SHALL take the pull request URL and return a typed
+successful, neutral, or skipped. The playbook SHALL accept an `agent` handle,
+an ordered `sessionConfig` array, the commit-signing arguments applied to a
+repair commit, a wait budget, a poll interval, and a
+repair-attempt cap. It SHALL NOT accept a `cwd`: repair sessions run in the
+working directory of the supplied `agent` handle, so a consumer running outside
+a worktree pins the handle (e.g. `std.agent.inDirectory`) before constructing
+the playbook. Its `watch` operation SHALL take the pull request URL and return a typed
 outcome — `green` when every check passed, otherwise `unresolved` carrying the
 attempt count and a reason — rather than raising on exhaustion or timeout. The
 playbook SHALL NOT ask a human: a red check is either agent-fixable or
@@ -318,7 +362,12 @@ outcome.
 #### Scenario: Red checks are repaired
 
 - **WHEN** a check run fails and the repair budget remains
-- **THEN** the playbook hands the failing logs to the agent for a signed repair push and re-watches the rollup
+- **THEN** the playbook hands the failing logs to the agent for a repair push committed with the configured signing arguments and re-watches the rollup
+
+#### Scenario: Repair runs in the handle's directory
+
+- **WHEN** a repair push is issued
+- **THEN** the repair session runs in the working directory of the supplied `agent` handle
 
 #### Scenario: Repair budget exhausted
 

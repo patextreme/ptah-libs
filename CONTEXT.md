@@ -20,9 +20,19 @@ _Avoid_: utils, lib, common
 
 **Playbook**:
 A reusable workflow capability that consumers compose and configure rather
-than fork — e.g. an openspec lifecycle or a PR review loop.
+than fork — e.g. an openspec lifecycle or a PR review loop. A playbook that
+composes other playbooks is a Meta playbook.
 _Avoid_: Component (the unit's former name), template, plugin, module
 (module means any Luau file)
+
+**Meta playbook**:
+A playbook that *composes* stdlib helpers, other playbooks, and
+deterministic stages over a whole unit of work — e.g. taking one GitHub
+issue from pickup to a reviewed, CI-green pull request. The composition
+itself is the capability; a leaf playbook does not compose other
+playbooks.
+_Avoid_: orchestrator, pipeline (a composition of playbooks, not a generic
+runner), umbrella playbook
 
 **Convergence loop**:
 The core workflow pattern: prompt an agent, judge the result with a typed

@@ -33,8 +33,12 @@ See `proposal.md` — Why. Constraints that shape the approach:
 
 **Non-Goals:**
 
+- Migrating `input-output-hk/lace-id-portal` to a shim. That landing is a
+  **separate change gated on this library change merging to `main`**; this
+  change does not touch lace (see D8 and the Migration Plan).
 - Upstream offline coverage for the new playbooks and correcting the stale
-  README note (deferred; no tag is cut by this change — see Risks).
+  README note — the fix ships as a **follow-up OpenSpec change created before
+  this change is archived**; no tag is cut by this change (see Risks).
 - A daemon/loop operation (`std.daemon` already lets a consumer loop).
 - Lifting git-worktree mechanics to `std` now (one consumer; see Decisions).
 - Generalizing the review loop or openspec playbook — they already exist.
@@ -99,9 +103,13 @@ No stage sets `cwd` itself. The wrapper force-overwrites `cwd`.
 
 `run` / `process` return a discriminated outcome (`delivered` / `rejected` /
 `idle` / `failed`); the playbook records a stage failure (comment, label swap,
-release claim) and returns `failed`; the shim maps outcomes to exit codes. The
-playbook never calls `ptah.exit` or `ptah.ask`; nested playbooks escalate
-through their own mechanism.
+release claim) and returns `failed`; the shim maps outcomes to exit codes. Two
+nested outcomes fail the run, mirroring each other: a CI gate `unresolved`, and
+a PR review loop that returns non-converged. Both are recorded through the same
+failure bookkeeping and return a `failed` outcome carrying the reason — the
+review verdict for the latter — so a pull request with open blocking findings is
+never reported `delivered`. The playbook never calls `ptah.exit` or
+`ptah.ask`; nested playbooks escalate through their own mechanism.
 
 - *Alternative — raise and let the shim catch*: rejected; it splits the
   bookkeeping across the boundary and matches neither `prReviewLoop`'s
@@ -110,10 +118,22 @@ through their own mechanism.
 ### D6 — Config surface: required repo shape, defaulted caps, dropped cosmetics
 
 Required: `readyLabel`, `blockedLabel`, `baseBranch`, `branchPrefix`,
-`gateCommands`. Defaulted: `worktreeDir`, `pickupLimit`, `maxAttempts`,
-`reviewMaxIterations`, `commitTypes`, `commitSignArgs`, `openspec`, and the
-CI bounds. Dropped as config: label colors (built-in defaults). Role handles
-and the three session-config arrays follow the existing playbooks.
+`gateCommands`. Defaulted: `worktreeDir` (default `"tmp"` relative to the
+repository root, resolved to an absolute path before use so no exec runs with
+a relative working directory), `pickupLimit` (bounds the candidate issues
+inspected while searching; a run still claims and processes at most one),
+`maxAttempts` (bounds the playbook's own typed-result retries — the triage
+verdict and the delivery session's pull-request URL), `reviewMaxIterations`
+(forwarded to the nested PR review loop's cap), `commitTypes`
+(the conventional-commit vocabulary the triage verdict draws from),
+`commitSignArgs` (also forwarded to the nested CI gate for its repair commits),
+`openspec`, and the CI bounds. Dropped as config: label colors (built-in
+defaults). Role handles and the three session-config arrays follow the
+existing playbooks: `agent` / `sessionConfig` drive the playbook's own stages
+and are forwarded as the work role to every nested playbook,
+`judgeAgent` / `judgeSessionConfig` reach the nested openspec and
+pr-review-loop judges, and `reporterAgent` / `reporterSessionConfig` reach the
+nested PR review loop.
 
 - *Alternative — default the labels*: rejected; it would bake `ai-r4d` into
   the library, which D3 rejects.
@@ -128,15 +148,24 @@ change directory to exist first.
 - *Alternative — always on*: rejected; it would force the openspec
   environment on consumers that do not use openspec.
 
-### D8 — Lace migration: shim in the same change, pinned to `rev = "main"`
+### D8 — Lace migration deferred to a separate landing, pinned to `rev = "main"`
 
-The ten modules collapse to one shim; `pesde.lock` records the resolved tree
-id, so `rev = "main"` is reproducible at lock time. The tag-pinned model in
-the *Package consumption* spec remains the documented target; lace's `main`
-pin is a deliberate pre-tag state.
+Lace's ten modules collapse to one shim that requires this package, but that
+landing is **out of scope for this change**: it ships as a separate change
+gated on this library change merging to `main`, so this change stays a
+single-repo, self-verifiable unit and does not touch
+`input-output-hk/lace-id-portal`. The dependency stays pinned
+`rev = "main"` as the documented target for when the shim lands; `pesde.lock`
+then records the resolved tree id, so `rev = "main"` is reproducible at lock
+time, and the tag-pinned model in the *Package consumption* spec remains the
+documented target.
 
+- *Alternative — shim in the same change*: rejected by the user; the library
+  must land on `main` first, and a cross-repo edit cannot be verified against
+  a `main` that does not yet carry the new exports.
 - *Alternative — pin a merge SHA or cut a tag*: rejected by the user; the lock
-  already provides reproducibility, and this change deliberately cuts no tag.
+  (once the shim lands) already provides reproducibility, and this change
+  deliberately cuts no tag.
 
 ### D9 — Module boundary: `std/shell` shared, no issue/PR domain in std
 
@@ -151,24 +180,29 @@ only.
 ## Risks / Trade-offs
 
 - **The change adds the largest module in the tree with no offline coverage**
-  → Recorded as a deferred obligation; the ptah suite requirement stays
-  unsatisfied until the follow-up, and no tag is cut. The deterministic
+  → The permanent *Offline test coverage* requirement stays unsatisfied until
+  the follow-up; the follow-up change is a hard deliverable of this change
+  (created before archive), and no tag is cut. The deterministic
   re-checks (commits-ahead, URL shape, title, label lifecycle) stay in the
   playbook so the safety net is by construction.
 - **The stale README claim ("no suite yet … no tag") is left standing** → The
-  user chose to defer it; it is listed as a non-goal, and the follow-up must
-  correct it before any tag.
-- **Cross-repo verification**: the change edits `ptah-libs` and lace's branch
-  in one unit → The lace shim is a pure data file plus a re-lock, reviewable
-  in isolation; the library change is verifiable on its own via `ptah check`.
+  user chose to defer it; it is listed as a non-goal, and the follow-up change
+  (created before archive) corrects it before any tag.
+- **The lace landing is now out of scope** → This change touches only this
+  repository and is verifiable on its own via `ptah check`; the lace shim is a
+  separate landing gated on the library merging to `main` (see D8 and the
+  Migration Plan).
 - **Concurrent runs racing on the same issue** → The claim is the assignee
-  write; a lost claim skips the issue rather than failing the run.
+  write verified by a re-read: after assigning itself, a run re-reads the
+  assignee set and, unless it is exactly the authenticated user, releases
+  itself and skips the issue rather than failing the run.
 - **CI rollup shape drift** (check-run `conclusion`/`status` vs status-context
   `state`) → `ciGate` classifies across all three fields, and pending entries
   never read as failures.
 - **Worktree directory is not automatically ignored** → `worktreeDir` defaults
-  to a gitignored path in lace (`tmp`); documentation must state the consumer
-  is responsible for ignoring it.
+  to `"tmp"`, which is not gitignored by default; the playbook README states
+  the consumer is responsible for gitignoring it (the deferred lace shim will
+  pass `worktreeDir = "tmp"` explicitly when it lands).
 - **`repoBrief` prose is inlined into every stage prompt** → Documented, with
   the pointer style (reference a repo document) recommended for long text.
 
@@ -177,12 +211,15 @@ only.
 1. Land the library change on `main`: `std.agent`, `std.shell`, `std.gh` /
    `std.daemon` re-route, `playbooks/issue-worker/`, `playbooks/ci-gate/`,
    `lib.luau` exports, `CONTEXT.md`.
-2. Replace lace's `.ptah/workflows/issue-worker/` (ten modules) with the shim
-   on the `issue-worker` branch and re-lock pesde.
-3. Run `ptah check` on the shim from lace (the compatibility gate) and one
-   dry validation of the lifecycle.
-4. Rollback: revert the lace shim to the previous modules (the branch is
-   unmerged); the library change is additive and can be reverted independently.
+2. **(Separate landing, out of scope here)** Replace lace's
+   `.ptah/workflows/issue-worker/` (ten modules) with the shim on the
+   `issue-worker` branch and re-lock pesde (`rev = "main"`), gated on step 1
+   having merged to `main`.
+3. **(Separate landing)** Run `ptah check` on the shim from lace (the
+   compatibility gate) and one dry validation of the lifecycle.
+4. Rollback: the library change is additive and can be reverted independently;
+   the separate lace landing carries its own rollback (revert the shim to the
+   previous modules — the branch is unmerged).
 
 ## Open Questions
 

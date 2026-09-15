@@ -37,9 +37,13 @@ ops:groom("add-auth")
 
 -- also available:
 -- libs.prReviewLoop.new({ ... })
+-- libs.issueWorker.new({ ... })
+-- libs.ciGate.new({ ... })
+-- libs.std.agent.inDirectory(agent, dir)
+-- libs.std.shell.mustRun("git rev-parse --show-toplevel")
 -- libs.std.predicate.new({ ... })
 -- libs.std.gh.run({ ... })
--- libs.std.daemon.run({ ... })
+-- libs.std.daemon.each({ ... })
 -- libs.std.sessionConfig.apply(session, entries)
 ```
 
@@ -49,12 +53,17 @@ ops:groom("add-auth")
 
 | Key | Value |
 | --- | --- |
+| `std.agent` | agent directory scoping (wrap a handle so every session it creates runs in a fixed directory) |
+| `std.shell` | exec helpers (`trim`, POSIX-safe `quote`, `mustRun`, `succeeds`, `errorMessage`) |
 | `std.predicate` | typed boolean judge (bounded retry; exhaustion is a script error) |
 | `std.gh` | GitHub CLI transport over `ptah.exec` with structured outcomes |
 | `std.daemon` | repo loop skeleton with per-repo error isolation |
 | `std.sessionConfig` | ordered session-config entries — the shared apply mechanism |
+| `std.escalate` | best-effort escalation transport over ptah's ask (outcomes as data; no ask raises) |
 | `openspec` | openspec change playbook (groom, implement, verify) |
 | `prReviewLoop` | convergent PR review loop (typed judge + PR-comment ledger) |
+| `issueWorker` | meta playbook: one GitHub issue from pickup to a reviewed, CI-green PR |
+| `ciGate` | watch a PR's check rollup to green with bounded signed repair pushes |
 
 Playbooks are constructed with `new(config)`; per-call data (a change name,
 a PR URL) is a method argument. See [The playbook
@@ -118,6 +127,12 @@ conventions](#loop-conventions), and [Session config](#session-config) below.
   - `predicate.luau` — typed boolean judge (asks an agent whether a
     predicate holds for a payload; bounded retry, exhaustion is a script
     error).
+  - `agent.luau` — agent directory scoping: wrap a handle so every
+    session it creates is pinned to one working directory (the seam that
+    lets a playbook take no `cwd` but still run in a worktree).
+  - `shell.luau` — exec helpers shared by the transport modules: two-sided
+    `trim`, POSIX-safe single `quote`, `mustRun` (raise on non-zero),
+    `succeeds` (any exit code as data), and `errorMessage`.
   - `gh.luau` — GitHub CLI transport over `ptah.exec` with structured
     outcomes (never raises for a failed command) and POSIX-safe argument
     quoting.
@@ -139,6 +154,13 @@ conventions](#loop-conventions), and [Session config](#session-config) below.
   - `pr-review-loop/` — convergent review→validate→fix→verify loop
     against a pull request (typed judge, PR-comment ledger; ships the
     built-in persona and the component-owned protocol fragment).
+  - `ci-gate/` — watch a pull request's check rollup to green and drive a
+    bounded number of signed repair pushes (typed outcome; never raises
+    on exhaustion or timeout).
+  - `issue-worker/` — the meta playbook: one GitHub issue from pickup to a
+    reviewed, CI-green pull request, composing `std`, the other
+    playbooks, and deterministic git/`gh` stages (private `git.luau`
+    mechanics; ships its own `README.md`).
 - `pesde.toml` — package manifest (`luau` target, `lib = "lib.luau"`).
 - `CONTEXT.md` — the library's vocabulary.
 

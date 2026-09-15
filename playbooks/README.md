@@ -15,9 +15,18 @@ module's internal `../../std/…` requires identically. See
 
 - `openspec/` — groom, implement, verify an openspec change
 - `pr-review-loop/` — convergent review→validate→fix→verify loop on a pull request
+- `ci-gate/` — watch a pull request's check rollup to green, with a bounded
+  number of signed repair pushes (typed outcome)
+- `issue-worker/` — the meta playbook: one GitHub issue from pickup to a
+  reviewed, CI-green pull request, composing `std`, the other playbooks,
+  and deterministic stages (private `git.luau` mechanics)
 
-Both convergence-loop playbooks escalate to a human through the
-stdlib's `escalate` transport when a judged pass cannot proceed — an
-answered ask resumes the loop, a refused or unservable ask fails the
-operation (see `../README.md` for the loop conventions and each
-playbook's README for its escalation behavior).
+A **meta playbook** composes `std`, other playbooks, and deterministic
+stages over a whole unit of work — `issue-worker` is the first. The
+convergence-loop playbooks (`openspec`, `pr-review-loop`) escalate to a
+human through the stdlib's `escalate` transport when a judged pass cannot
+proceed — an answered ask resumes the loop, a refused or unservable ask
+fails the operation (see `../README.md` for the loop conventions and each
+playbook's README for its escalation behavior). `ci-gate` and
+`issue-worker` are outcome-as-data: they return typed outcomes instead of
+asking, and the calling script owns the policy.
