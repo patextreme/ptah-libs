@@ -13,7 +13,7 @@ local daemon = require("./std/daemon")
 local sessionConfig = require("./std/session-config")
 local escalate = require("./std/escalate")
 local openspec = require("./playbooks/openspec/playbook")
-local prReviewLoop = require("./playbooks/pr-review-loop/playbook")
+local pr = require("./playbooks/pr/playbook")
 
 return {
 	std = {
@@ -24,5 +24,5 @@ return {
 		escalate = escalate,
 	},
 	openspec = openspec,
-	prReviewLoop = prReviewLoop,
+	pr = pr,
 }
