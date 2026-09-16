@@ -44,7 +44,7 @@ local worktree = require("@ptah_libs/std/worktree")
 -- for development. Required by the issue playbook, which never defaults it.
 local QUEUE_LABEL = "ai-r4d"
 
-local MODEL = "ollama-cloud/deepseek-v4.1-flash"
+local MODEL = "zai/glm-5.3-flash"
 
 -- The base every issue's worktree branches from, fetched first so each issue
 -- starts from the freshest merged state. A local ref would silently base
