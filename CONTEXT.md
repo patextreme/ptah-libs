@@ -88,7 +88,21 @@ _Avoid_: ai-r4d (one repo's instance), intake label, ready label
 An agent's posted, persistent assertion that it has taken an issue for
 work. The earliest claim on an issue wins, verified by reading the claims
 back.
-_Avoid_: assignment (GitHub's own concept), lock, reservation
+_Avoid_: assignment (the routing signal below), lock, reservation
+
+**Assignment**:
+GitHub's assignee field as the pickup scope: an issue is picked up only
+by a run whose authenticated account is among the issue's assignees. A
+human sets it to route the issue; the winning run records itself on
+claim, and the playbook removes no one.
+_Avoid_: claim (the marker protocol, not the routing), owner (repo owner
+is a different concept)
+
+**Eligibility**:
+The three-signal gate before a claim attempt: queue label present, the
+authenticated account among the assignees, no claim marker comment. Only
+the marker signal needs a second read.
+_Avoid_: readiness (the queue label alone), triage (out of scope)
 
 **Escalated**:
 A triage classification meaning a human must look at the issue — persisted
