@@ -20,6 +20,10 @@ of them. ptah exposes no run id to scripts today
 (`.ptah/runs/` ids are storage-side only), and a claim's identity is the
 posting gh account, not the execution.
 
-Rejected: gh assignees (no exclusivity — adding an assignee never fails),
-label-swap-only (a race window between list and edit), and branch
-reservation (atomic, but demands push rights at claim time).
+Rejected as the *claim* mechanism: gh assignees (no exclusivity —
+adding an assignee never fails; [ADR
+0003](0003-pickup-scoped-to-own-assignments.md) later adopts the
+assignee field as the pickup *scope*, not the claim, and the earliest
+marker still decides contested issues), label-swap-only (a race window
+between list and edit), and branch reservation (atomic, but demands push
+rights at claim time).

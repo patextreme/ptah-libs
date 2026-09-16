@@ -102,3 +102,11 @@ implementation-time verification, not a design unknown: the exact GitHub
 permission floor for self-assign (triage vs. any authenticated user on
 public repos) — the task declares the requirement and asserts the
 documented floor.
+
+Verification venue: the sandbox repo
+(`patextreme/ptah-issue-sandbox`) has a single assignable account, and the
+REST assignees endpoint silently drops non-assignable users, so the
+**foreign-assigned** and **cross-account-contention** branches are
+exercised against a scratch `gh` transport stub (`.work/stub/`) while the
+assigned/unassigned, pagination, write-ordering, and explicit-error
+branches run against the real sandbox.
