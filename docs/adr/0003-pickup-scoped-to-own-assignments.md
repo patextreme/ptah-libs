@@ -24,6 +24,14 @@ enforces the same gate and raises "not assigned to you" as its own
 reason; the `no-eligible-issue` scan summary counts issues examined under
 the full scope, not the whole labeled queue.
 
+Amended by [ADR
+0004](0004-pickup-eligible-unless-foreign-assigned.md): the gate flips
+from "the account is among the assignees" to "not foreign-assigned" — an
+unassigned issue becomes eligible, the scan drops the `assignee=`
+narrowing, and `scanned` re-counts — while the among-not-sole rule, the
+single authenticated identity, the winners-only writes, and the
+assignee-write floor stand.
+
 Rejected: sole-assignee eligibility (a cc'd teammate would silently kill
 pickup; contention is the marker's job), a configured assignee identity
 (decouples filter identity from claim identity for no evident use),
