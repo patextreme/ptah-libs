@@ -41,6 +41,7 @@ ops:groom("add-auth")
 -- libs.std.predicate.new({ ... })
 -- libs.std.gh.run({ ... })
 -- libs.std.daemon.run({ ... })
+-- libs.std.worktree.provision({ ... }) / libs.std.worktree.teardown(wt)
 -- libs.std.sessionConfig.apply(session, entries)
 ```
 
@@ -54,6 +55,7 @@ ops:groom("add-auth")
 | `std.gh` | GitHub CLI transport over `ptah.exec` with structured outcomes |
 | `std.daemon` | repo loop skeleton with per-repo error isolation |
 | `std.sessionConfig` | ordered session-config entries — the shared apply mechanism |
+| `std.worktree` | git worktree lifecycle over `ptah.exec`: `provision` (adopt / fast-forward-or-fail / create; never reset) and `teardown` (refuse-dirty; never branches) |
 | `openspec` | openspec change playbook (groom, implement, verify) |
 | `pr` | convergent PR review loop (typed judge + PR-comment ledger) |
 | `issue` | agent-free issue pickup (queue-label scan + earliest-claim marker) |
@@ -130,6 +132,10 @@ conventions](#loop-conventions), and [Session config](#session-config) below.
     (the human's answer), `abort` (the human refused), or
     `unavailable` (the provider's reason) as data — no ask ever
     raises, and no provider needs to be configured.
+  - `worktree.luau` — git worktree lifecycle over `ptah.exec`:
+    `provision` (adopt as-is / fast-forward-or-fail / create; never
+    reset) and `teardown` (refuse-dirty, never branches). `git` on PATH
+    is a declared environment requirement.
 - `playbooks/<name>/` — one directory per playbook: `playbook.luau` is the
   facade module exposing `new(config) -> instance`, and the sibling
   `README.md` declares the playbook's environment requirements. (The module
@@ -220,6 +226,58 @@ Asks display the work session's ptah label (what the run's rendered
 stream is keyed by) and the agent-side ACP session id
 (`session:sessionId()`) — the id the agent's own tooling can resume or
 list — so a human can correlate the ask with the session.
+
+## Worktrees
+
+`std.worktree` is git's worktree lifecycle as transport over
+`ptah.exec`: a shim points a playbook at a checkout no other run shares,
+without managing git state by hand. It takes no agent handle and no
+configuration table, and `git` on PATH is a declared environment
+requirement — exactly as `gh` is for the PR transport.
+
+```lua
+local libs = require("./luau_packages/ptah_libs")
+
+-- One worktree per run, beside the repository (never inside it).
+local wt = libs.std.worktree.provision({
+	name = "pr-42",             -- path: <sibling of the repo root>/<repo>-pr-42
+	ref = "origin/fix/login",   -- required; never the shared tree's HEAD
+	-- branch defaults to the ref's short name (`fix/login`)
+	fetch = true,              -- fetch the ref's remote before resolving
+})
+
+-- Every session the playbook creates runs inside it (absolute path).
+local loop = libs.pr.new({
+	agent = ptah.agent("claude"),
+	judgeAgent = ptah.agent("claude"),
+	reporterAgent = ptah.agent("claude"),
+	workingDir = wt.path,
+})
+
+loop:review("https://github.com/o/r/pull/42")
+
+-- Teardown returns its outcome as data: a dirty refusal is the expected
+-- post-crash outcome, so log it and continue rather than failing the run.
+local teardown = libs.std.worktree.teardown(wt)
+if not teardown.ok then
+	ptah.log(`worktree kept at {wt.path}: {teardown.stderr}`)
+end
+```
+
+A rerun resolves without destroying anything. A registered worktree at
+the derived path is **adopted as-is** (branch-verified); an existing
+branch whose ref is its remote-tracking counterpart is
+**fast-forwarded-or-failed** through `git fetch <remote> <branch>:<branch>`
+(a no-op when current, a fast-forward when behind, a loud error when
+diverged); any other existing branch is **attached as-is**, preserving a
+crashed run's unpushed commits. A failed provision **raises** carrying
+git's stderr — the run cannot proceed without a worktree.
+
+`teardown` **refuses a dirty worktree** by default (`force` discards the
+changes), then removes and prunes. It never touches branches: unpushed
+commits survive on the local branch, and branch deletion is deliberately
+outside the API. See the `playbooks` spec's *Worktree lifecycle*
+requirement for the full contract.
 
 ## Session config
 

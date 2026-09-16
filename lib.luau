@@ -12,6 +12,7 @@ local gh = require("./std/gh")
 local daemon = require("./std/daemon")
 local sessionConfig = require("./std/session-config")
 local escalate = require("./std/escalate")
+local worktree = require("./std/worktree")
 local openspec = require("./playbooks/openspec/playbook")
 local pr = require("./playbooks/pr/playbook")
 local issue = require("./playbooks/issue/playbook")
@@ -23,6 +24,7 @@ return {
 		daemon = daemon,
 		sessionConfig = sessionConfig,
 		escalate = escalate,
+		worktree = worktree,
 	},
 	openspec = openspec,
 	pr = pr,

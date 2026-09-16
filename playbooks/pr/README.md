@@ -202,6 +202,11 @@ local loop = pr.new({
 	reporterSessionConfig = {             -- optional: applied to every
 		{ id = "model", value = "haiku" },    -- reporter session
 	},
+	-- optional: an absolute directory every session runs in (review/fix,
+	-- judge, and reporter alike); nil keeps the invocation directory.
+	-- Usually a worktree's path, but the playbook is git-agnostic —
+	-- provisioning is the shim's business.
+	-- workingDir = "/abs/path/to/checkout",
 	-- optional (default when nil: the built-in persona): the persona
 	-- layer — the entire reviewer instruction as text, full replacement,
 	-- no classification duties. Long or repo-pinned instructions usually
@@ -223,6 +228,16 @@ reporter session. Option ids are agent-specific — enumerate what your agent
 offers with `session:configOptions()`. The removed `model`/`judgeModel`
 fields are nil-typed: configuring one is a `ptah check` type error naming the
 field.
+
+`workingDir` is an **absolute** directory that receives **every** session
+the playbook creates — each review/fix work session, every judge session,
+and every reporter session — so no session of the loop can read or write
+the wrong tree. Nil (the default) keeps today's behavior byte-for-byte:
+sessions run in the invocation directory. The playbook is **git-agnostic**:
+it declares no worktree field and never provisions or tears one down — the
+field is just a directory, and pointing it at one produced by
+`std.worktree` (or a plain clone) is the calling shim's business. Pass an
+absolute path; a relative one is not resolved by the playbook.
 
 `judgeAgent` is **required and load-bearing**: the loop's convergence is
 computed from the judge's typed output, and there is no prose-parsing
