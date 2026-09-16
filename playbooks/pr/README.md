@@ -23,10 +23,13 @@ pass** — the loop cannot exit having just mutated the PR.
   `lastReviewedSha` and directs the reviewer to review only the changes since
   that commit and to report recurrences by ledger finding id.
 - **Judge** — the work session reviews in prose; a judge session created with
-  a `resultSchema` receives the prose, the ledger, the PR's intention, and the
-  configured `blockingAdditions`, and returns typed findings (severity,
-  family, validation status, `needsHuman`) plus a reconciliation of the
-  ledger's open findings.
+  a `resultSchema` receives the prose, the ledger (open **and** deferred
+  findings with their ids), the PR's intention, and the configured
+  `blockingAdditions`, and returns typed findings (severity, family,
+  validation status, `needsHuman`) plus a reconciliation of the ledger's open
+  and deferred findings — resolved (with evidence), still open, or still
+  deferred. A recurrence of a deferred finding is reported against that
+  finding's id as still deferred, never refiled as a duplicate.
 - **Converge and report** — when the judge reports no open blocking
   findings, the loop closes the review session, the **reporter agent**
   authors the PR review report, and the playbook prepends a deterministic
@@ -35,8 +38,10 @@ pass** — the loop cannot exit having just mutated the PR.
 - **Fix** — when open blocking findings remain and budget remains, one batched
   fix turn addresses all of them by root cause, followed by commit-and-push
   (gated by `dryRun`).
-- **Escalate** — the judge's `needsHuman` flag is the loop's only escalation
-  trigger; it routes through the stdlib's `escalate` transport (see below).
+- **Escalate** — the judge's `needsHuman` flag on an **open blocking** finding
+  is the loop's only escalation trigger; it routes through the stdlib's
+  `escalate` transport and the answer is adjudicated into typed ledger
+  mutations before any fix turn (see below).
 - **Cap** — a single `maxIterations` (default 8). At the cap with open
   findings the loop ends and returns a non-converged outcome **without
   fixing** — the final unit is always a review.
@@ -101,12 +106,25 @@ The loop's state lives in a **dedicated PR comment** marked
 `<!-- ptah:pr-review-ledger -->`, updated in place through the `gh` transport.
 It carries the PR identity, the discovery SHA and the `lastReviewedSha`, the
 PR's intention, the findings (id, one-line title, family, severity, validation
-status, status `open`/`fixed`/`deferred`/`accepted`, fixing commit), the family
-table, and the resolved count.
+status, the judge's `needsHuman` determination, status
+`open`/`fixed`/`deferred`/`accepted`, fixing commit), the family table, the
+resolved count, and a decisions record.
 
 - **Auto-resume, no flag.** A fresh `review()` against a PR whose ledger
   comment exists resumes from it: open blocking findings drive a fix turn; a
   clean ledger at the current head converges immediately.
+- **`needsHuman` and decisions.** Each finding carries the judge's latest
+  `needsHuman` determination: recorded when the finding is filed, updated
+  when a later reconciliation revisits it, cleared when an adjudicated
+  decision records a mutation for it (the human's determination supersedes
+  the judge's). The report renders the flag on undecided findings' lines and
+  annotates decided findings as maintainer decisions. Every answered ask is
+  recorded in the ledger's **decisions record** — the ask's prompt line, the
+  verbatim answer, and the applied per-finding mutations with their notes,
+  in ask order, no timestamps. A ledger written before these fields existed
+  reads tolerantly (a finding without the flag is treated as not needing a
+  human, no decisions assumed) and both fields are written on the next
+  persist.
 - **Retention.** Once a finding's fix is verified clean in a later review
   pass, the finding is retained as a terminal one-line entry with status
   `fixed` (id, title, family, fixing commit) and the resolved count
@@ -184,6 +202,12 @@ the PR; `outcome.verdict` keeps its meaning (the final review verdict text).
 - **No CI or gate reading** — the playbook never reads check results or
   executes gate commands; that is the calling script's job.
 
+## Coverage contract
+
+This library ships no test suite: the ptah repository's offline suite owns
+coverage for this playbook's escalation semantics — the gated trigger, the
+deferred reconciliation value, and the adjudication mutations.
+
 ## Config (data plus declared agent handles)
 
 ```lua
@@ -223,11 +247,11 @@ local loop = pr.new({
 Session-config entries (`{ id, value }`, applied in declared array
 order — see the library README's [Session config](../../README.md#session-config)
 section) reach: `sessionConfig` → each review/fix work session;
-`judgeSessionConfig` → every judge session; `reporterSessionConfig` → every
-reporter session. Option ids are agent-specific — enumerate what your agent
-offers with `session:configOptions()`. The removed `model`/`judgeModel`
-fields are nil-typed: configuring one is a `ptah check` type error naming the
-field.
+`judgeSessionConfig` → every judge session **and every adjudication session**;
+`reporterSessionConfig` → every reporter session. Option ids are
+agent-specific — enumerate what your agent offers with `session:configOptions()`.
+The removed `model`/`judgeModel` fields are nil-typed: configuring one is a
+`ptah check` type error naming the field.
 
 `workingDir` is an **absolute** directory that receives **every** session
 the playbook creates — each review/fix work session, every judge session,
@@ -269,21 +293,49 @@ The playbook ships facade-only (`:review`). A `run()` daemon convenience
 (looping over open PRs) was deliberately deferred: it is sugar over
 `std.daemon` + `:review` and can be added without breaking the facade.
 
-## Escalation (ask when served, fail otherwise)
+## Escalation (gated trigger, adjudicated answers)
 
-The judge's `needsHuman` flag is the loop's only escalation trigger (there is
-no separate probe session). When flagged, the loop escalates through the
-stdlib's `escalate` transport: it pauses on an ask — the work session stays
-open — whose prompt line identifies the loop, the PR URL, and the iteration
-state (`pr-review https://github.com/o/r/pull/42: human input required
-(iteration 2 of 8)`) and whose details carry the work session's label and the
-**full** review prose, untruncated, so the human can answer. Three outcomes:
+The loop's only escalation trigger is the judge's `needsHuman` flag **on a
+finding that gates convergence**: the loop asks only when an open, blocking
+finding carries it — whether raised as a new finding or through a
+reconciliation record. A reconciliation record triggers only when the ledger
+finding it names by id is itself open and blocking; a record naming an id
+absent from the ledger never escalates. `needsHuman` on a non-blocking or
+deferred finding does not ask: the concern surfaces in the review prose and
+the posted report, with the flag persisted in the ledger. (There is no
+separate probe session.)
 
-- **respond** — the answer is sent verbatim as the next prompt of the
-  still-open work session (no header, no framing: the human is driving the
-  agent), and the commit-and-push step follows the human-guided fix exactly as
-  it follows any fix (gated by `dryRun`). The iteration counts against the cap
-  and the loop continues toward convergence.
+When the trigger fires, the loop escalates through the stdlib's `escalate`
+transport: it pauses on an ask — the work session stays open — whose prompt
+line identifies the loop, the PR URL, and the iteration state, and **names
+every triggering finding** (id, family, severity, title):
+`pr-review https://github.com/o/r/pull/42: human input required (iteration 2
+of 8) — decision needed on: f3 (blocking, family sync): …`. The details open
+with the answer grammar the loop understands — `defer <id>`, `accept <id>`,
+`fix: <instructions>` — then carry the work session's label, the agent-side
+ACP session id, and the **full** review prose, untruncated. Three outcomes:
+
+- **respond** — the answer is **adjudicated before any fix turn**: a typed
+  adjudication session (the judge agent under a dedicated result schema,
+  `pr-review-adjudicate:{iteration}`) receives the verbatim answer, the
+  triggering findings, and the ledger, and returns per-finding mutations:
+  `defer` (open → deferred) and `accept` (open → accepted), each with an
+  optional note, and `fix` (the finding stays open — the answer's text
+  directs its fix). Mutations target existing open findings only: ids that
+  are unknown or already terminal are no-ops, and adjudication never creates
+  findings. The ask's prompt line, the verbatim answer, and the applied
+  mutations are recorded in the ledger's decisions record, and the decided
+  findings' `needsHuman` flags clear. When the adjudication includes at
+  least one `fix` mutation, the answer is sent verbatim as the next prompt
+  of the still-open work session (no header, no framing: the human is
+  driving the agent) and the commit-and-push step follows the human-guided
+  fix exactly as it follows any fix (gated by `dryRun`); a decision-only
+  answer issues no work-session prompt and no push. The iteration counts
+  against the cap either way, and when a decision-only adjudication leaves
+  no open blocking findings the loop converges immediately — no further
+  review pass. An adjudication session that submits no typed result is
+  retried a bounded number of times; exhaustion fails the iteration — never
+  a silent mutation.
 - **abort** (the human refused the ask) — the operation fails with
   `pr-review: human aborted escalation (iteration N of M)` and no fix is
   issued.
