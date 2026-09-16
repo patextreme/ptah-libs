@@ -26,7 +26,7 @@ the supported consumer surface.
 #### Scenario: Entry exports the library surface
 
 - **WHEN** a consumer requires the generated dependency shim
-- **THEN** `std.predicate`, `std.gh`, `std.daemon`, `std.sessionConfig`, `std.escalate`, `openspec`, `pr`, and `issue` are available on the returned table
+- **THEN** `std.predicate`, `std.gh`, `std.daemon`, `std.sessionConfig`, `std.escalate`, `std.worktree`, `openspec`, `pr`, and `issue` are available on the returned table
 
 #### Scenario: The renamed export replaces the former name
 
