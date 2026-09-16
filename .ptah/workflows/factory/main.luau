@@ -225,7 +225,7 @@ local function runIssue(brief: Brief): nil
 	local change = resolveChange(brief)
 	if change ~= nil then
 		ptah.log(("factory: issue #%d resolved to openspec change `%s`"):format(brief.number, change))
-		-- skip gromming as spec is assumed to be ready before marking as r4d
+		opsx:groom(change)
 		opsx:implement(change)
 		opsx:verify(change)
 		ptah.log(("factory: change `%s` implemented, verified, synced, and archived"):format(change))
