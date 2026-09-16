@@ -322,8 +322,11 @@ ACP session id, and the **full** review prose, untruncated. Three outcomes:
   `defer` (open → deferred) and `accept` (open → accepted), each with an
   optional note, and `fix` (the finding stays open — the answer's text
   directs its fix). Mutations target existing open findings only: ids that
-  are unknown or already terminal are no-ops, and adjudication never creates
-  findings. The ask's prompt line, the verbatim answer, and the applied
+  are unknown or already terminal are no-ops, adjudication never creates
+  findings, and the contract is one decision per finding — when an answer
+  names a finding more than once, only the last mutation applies (so a
+  pushed fix turn always leaves its finding open and is always followed by
+  a review pass). The ask's prompt line, the verbatim answer, and the applied
   mutations are recorded in the ledger's decisions record, and the decided
   findings' `needsHuman` flags clear. When the adjudication includes at
   least one `fix` mutation, the answer is sent verbatim as the next prompt

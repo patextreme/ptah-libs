@@ -698,15 +698,31 @@ end
 -- Apply adjudication mutations to the ledger: `defer` transitions open →
 -- deferred and `accept` open → accepted (the decision note is retained in
 -- the recorded decision), `fix` leaves the finding open for the
--- answer-directed fix turn. Mutations target existing open findings only —
--- an unknown or already-terminal id is a no-op, and adjudication never
--- creates findings. A decided finding's `needsHuman` flag clears: the
--- human's determination supersedes the judge's. Returns the applied
--- mutations (the recorded decision carries these, notes included).
+-- answer-directed fix turn. The contract is one decision per finding: when
+-- the adjudicator names an id more than once, only its last mutation
+-- applies — an earlier `fix` can never be followed by a same-batch terminal
+-- transition of the same finding, so a pushed fix turn always has its
+-- finding still open and is always followed by a review pass. Mutations
+-- target existing open findings only — an unknown or already-terminal id is
+-- a no-op, and adjudication never creates findings. A decided finding's
+-- `needsHuman` flag clears: the human's determination supersedes the
+-- judge's. Returns the applied mutations (the recorded decision carries
+-- these, notes included).
 local function applyMutations(ledger: Ledger, mutations: { LedgerMutation }): { LedgerMutation }
-	local applied: { LedgerMutation } = {}
+	-- Collapse to one mutation per id: last wins, first-seen order kept.
+	local effective: { [string]: LedgerMutation } = {}
+	local order: { string } = {}
 	for _, mutation in mutations do
-		local finding = ledgerFindingById(ledger, mutation.id)
+		if effective[mutation.id] == nil then
+			table.insert(order, mutation.id)
+		end
+		effective[mutation.id] = mutation
+	end
+
+	local applied: { LedgerMutation } = {}
+	for _, id in order do
+		local mutation = effective[id]
+		local finding = ledgerFindingById(ledger, id)
 		if finding == nil or finding.status ~= "open" then
 			continue
 		end
@@ -1330,7 +1346,9 @@ function M.new(config: Config): Instance
 						-- re-confirming it over an empty delta buys a wasted
 						-- pass, not correctness. Nothing was pushed, so the
 						-- every-push-is-followed-by-a-review-pass invariant is
-						-- untouched.
+						-- untouched — and with one mutation per finding, an
+						-- applied `fix` leaves its finding open, so this check
+						-- can never fire after a push.
 						if not hasOpenBlocking(ledger) then
 							return finish("converged", verdict, verdict, iteration)
 						end

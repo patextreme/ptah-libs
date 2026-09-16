@@ -577,7 +577,10 @@ per-finding mutations: `defer` (the finding transitions open → deferred) and `
 (open → accepted), each with an optional note, and `fix` (the finding stays open and
 the answer directs its fix). Mutations SHALL target existing open findings only: ids
 that are unknown or already terminal are no-ops, and adjudication SHALL NOT create
-findings. The ask's prompt line, the verbatim answer, and the applied mutations SHALL
+findings. The contract SHALL be one decision per finding: when the adjudication names
+a finding id more than once, only its last mutation SHALL apply, so an applied `fix`
+mutation always leaves its finding open and a pushed fix turn is always followed by a
+review pass. The ask's prompt line, the verbatim answer, and the applied mutations SHALL
 be recorded in the ledger's decisions record, and a decided finding's persisted
 `needsHuman` flag SHALL be cleared. When the adjudication includes at least one `fix`
 mutation, the answer text SHALL be sent verbatim as the next prompt of the
@@ -695,6 +698,11 @@ continues the loop toward convergence, so the returned status is always
 
 - **WHEN** the adjudication output names a finding id that is unknown or already terminal
 - **THEN** no mutation is applied for that id and the loop proceeds
+
+#### Scenario: Duplicate adjudication ids keep the last decision
+
+- **WHEN** the adjudication returns more than one mutation for the same finding id
+- **THEN** only the last mutation for that id is applied and recorded, and a `fix` for a finding the same batch defers or accepts issues no fix turn and no push
 
 #### Scenario: Adjudication exhaustion fails the iteration
 
