@@ -11,3 +11,7 @@ repo. See `../README.md` for the library contract and consumption model.
 - `daemon.luau` — per-repo loop skeleton with error isolation
 - `escalate.luau` — best-effort escalation transport over ptah's ask
   facility (outcomes as data; no ask ever raises)
+- `worktree.luau` — git worktree lifecycle over `ptah.exec`: `provision`
+  (adopt as-is / fast-forward-or-fail / create; never reset) and
+  `teardown` (refuse-dirty, never branches); `git` on PATH is a declared
+  environment requirement

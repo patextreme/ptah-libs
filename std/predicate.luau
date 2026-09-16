@@ -16,6 +16,10 @@ export type PredicateOptions = {
 	-- before its prompt (no dedicated model field: a model choice is an
 	-- ordinary entry).
 	sessionConfig: { sessionConfig.Entry }?,
+	-- Working directory for every attempt session (so a caller running
+	-- a loop inside a working directory keeps its judge sessions there
+	-- too). Nil keeps today's behavior: the invocation directory.
+	cwd: string?,
 	maxAttempts: number?,
 }
 
@@ -52,6 +56,7 @@ local function predicate(predicateText: string, payload: string, options: Predic
 	for attempt = 1, maxAttempts do
 		local session: Session = options.agent:session({
 			id = options.sessionId,
+			cwd = options.cwd,
 			resultSchema = { type = "boolean" },
 		})
 		sessionConfig.apply(session, options.sessionConfig)

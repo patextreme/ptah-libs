@@ -38,6 +38,11 @@ local ops = openspec.new({
 	judgeSessionConfig = {  -- optional: applied to every judge and
 		{ id = "model", value = "haiku" },  -- human-probe session
 	},
+	-- optional: an absolute directory every session runs in (work,
+	-- judge, human-probe, and archive alike); nil keeps the invocation
+	-- directory. Usually a worktree's path, but the playbook is
+	-- git-agnostic — provisioning is the shim's business.
+	-- workingDir = "/abs/path/to/checkout",
 	maxIterations = 10,     -- optional: convergence cap (default 10)
 })
 ```
@@ -51,6 +56,17 @@ Option ids are agent-specific — enumerate what your agent offers with
 `session:configOptions()`. The removed `model`/`judgeModel` fields are
 nil-typed: configuring one is a `ptah check` type error naming the
 field (the migration note in the library README shows the entry form).
+
+`workingDir` is an **absolute** directory that receives **every**
+session the playbook creates — each per-iteration work session, every
+judge and human-escalation-probe session, and verify's archive session —
+so no session of the playbook can read or write the wrong tree. Nil (the
+default) keeps today's behavior byte-for-byte: sessions run in the
+invocation directory. The playbook is **git-agnostic**: it declares no
+worktree field and never provisions or tears one down — the field is
+just a directory, and pointing it at one produced by `std.worktree` (or
+a plain clone) is the calling shim's business. Pass an absolute path; a
+relative one is not resolved by the playbook.
 
 Functions are not configuration; every other field is data or a
 declared agent handle.

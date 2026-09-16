@@ -132,6 +132,12 @@ export type Config = {
 	judgeSessionConfig: { sessionConfig.Entry }?,
 	-- Ordered session-config entries applied to every reporter session.
 	reporterSessionConfig: { sessionConfig.Entry }?,
+	-- Absolute working directory for every session this playbook
+	-- creates (review/fix, judge, and reporter sessions alike). Nil
+	-- keeps today's behavior: sessions run in the invocation directory.
+	-- The playbook stays git-agnostic — this is just a directory;
+	-- provisioning it is the calling shim's business.
+	workingDir: string?,
 	-- The removed model fields, kept nil-typed so a configured value is a
 	-- type error naming the field (the analyzer does not flag unknown keys):
 	-- a model choice is an ordinary sessionConfig entry.
@@ -785,10 +791,11 @@ local function runJudge(
 	judgeAgent: Agent,
 	sessionId: string,
 	judgeSessionConfig: { sessionConfig.Entry }?,
+	cwd: string?,
 	prompt: string
 ): Findings
 	for attempt = 1, DEFAULT_JUDGE_ATTEMPTS do
-		local session: Session = judgeAgent:session({ id = sessionId, resultSchema = FINDINGS_SCHEMA })
+		local session: Session = judgeAgent:session({ id = sessionId, cwd = cwd, resultSchema = FINDINGS_SCHEMA })
 		sessionConfig.apply(session, judgeSessionConfig)
 		local result = session:prompt(prompt)
 		local typed = result.result :: Findings?
@@ -809,10 +816,11 @@ local function runReporter(
 	reporterAgent: Agent,
 	sessionId: string,
 	reporterSessionConfig: { sessionConfig.Entry }?,
+	cwd: string?,
 	prompt: string
 ): string
 	for attempt = 1, DEFAULT_REPORTER_ATTEMPTS do
-		local session: Session = reporterAgent:session({ id = sessionId, resultSchema = REPORT_SCHEMA })
+		local session: Session = reporterAgent:session({ id = sessionId, cwd = cwd, resultSchema = REPORT_SCHEMA })
 		sessionConfig.apply(session, reporterSessionConfig)
 		local result = session:prompt(prompt)
 		local typed = result.result :: Report?
@@ -913,6 +921,7 @@ function M.new(config: Config): Instance
 					reporterAgent,
 					"pr-review-reporter",
 					config.reporterSessionConfig,
+					config.workingDir,
 					buildReporterPrompt(prUrl, ledger, status, prose, iterations, maxIterations)
 				)
 				local posted = statusLine(status, ledger) .. "\n\n" .. body
@@ -938,7 +947,7 @@ function M.new(config: Config): Instance
 						return finish("non-converged", "", nil, 0)
 					end
 					local header = `[pr-review iteration {iteration + 1} of {maxIterations}]\n`
-					local session: Session = work:session({ id = `pr-review:{iteration}` })
+					local session: Session = work:session({ id = `pr-review:{iteration}`, cwd = config.workingDir })
 					sessionConfig.apply(session, config.sessionConfig)
 					session:prompt(buildFixPrompt(prUrl, ledger, header))
 					if push ~= nil then
@@ -959,7 +968,7 @@ function M.new(config: Config): Instance
 			while iteration < maxIterations do
 				local header = `[pr-review iteration {iteration + 1} of {maxIterations}]\n`
 				local reviewedSha = fetchHeadSha(prUrl)
-				local session: Session = work:session({ id = `pr-review:{iteration}` })
+				local session: Session = work:session({ id = `pr-review:{iteration}`, cwd = config.workingDir })
 				sessionConfig.apply(session, config.sessionConfig)
 
 				-- The work session reviews freely in prose; the protocol
@@ -973,6 +982,7 @@ function M.new(config: Config): Instance
 					judgeAgent,
 					`pr-review-judge:{iteration}`,
 					config.judgeSessionConfig,
+					config.workingDir,
 					buildJudgePrompt(prUrl, verdict, ledger, ledger.intention, config.blockingAdditions)
 				)
 				applyFindings(ledger, findings)

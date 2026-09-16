@@ -24,6 +24,12 @@ export type Config = {
 	-- human-escalation-probe session (forwarded into every predicate
 	-- call).
 	judgeSessionConfig: { sessionConfig.Entry }?,
+	-- Absolute working directory for every session this component
+	-- creates (work, judge, human-escalation-probe, and archive
+	-- sessions alike). Nil keeps today's behavior: sessions run in the
+	-- invocation directory. The playbook stays git-agnostic — this is
+	-- just a directory; provisioning it is the calling shim's business.
+	workingDir: string?,
 	-- The removed model fields, kept nil-typed so a configured value
 	-- is a type error naming the field (the analyzer does not flag
 	-- unknown keys): a model choice is an ordinary sessionConfig entry.
@@ -75,7 +81,7 @@ function M.new(config: Config): Instance
 	): string
 		for iteration = 0, maxIterations - 1 do
 			local header = `[{sessionId} iteration {iteration + 1} of {maxIterations}]\n`
-			local session: Session = work:session({ id = `{sessionId}:{iteration}` })
+			local session: Session = work:session({ id = `{sessionId}:{iteration}`, cwd = config.workingDir })
 			sessionConfig.apply(session, config.sessionConfig)
 
 			local outcome = session:prompt(header .. prompt)
@@ -84,6 +90,7 @@ function M.new(config: Config): Instance
 					agent = config.judgeAgent,
 					sessionId = `{sessionId}-judge:{iteration}`,
 					sessionConfig = config.judgeSessionConfig,
+					cwd = config.workingDir,
 				})
 			then
 				session:close()
@@ -99,6 +106,7 @@ function M.new(config: Config): Instance
 				agent = config.judgeAgent,
 				sessionId = `{sessionId}-escalate-judge:{iteration}`,
 				sessionConfig = config.judgeSessionConfig,
+				cwd = config.workingDir,
 			})
 			if needsHuman then
 				local answer = escalate.ask({
@@ -194,7 +202,7 @@ function M.new(config: Config): Instance
 			)
 			-- The sync-and-archive step is part of the same operation: it
 			-- runs once the verification loop has converged.
-			local archiver: Session = work:session({ id = "opsx-archiver" })
+			local archiver: Session = work:session({ id = "opsx-archiver", cwd = config.workingDir })
 			sessionConfig.apply(archiver, config.sessionConfig)
 			archiver:prompt(`Please sync and archive the change {change}`)
 			archiver:close()
