@@ -7,11 +7,13 @@
 -- unaffected), and adds the default-parent case: provision without
 -- `parent` against the throwaway repo lands at
 -- `<MAIN>/.ptah/worktree/main-<name>` with the parent auto-created, and
--- adoption and teardown behave as before; plus the stale-registration
--- case: after the worktree directory is deleted out-of-band
--- (`git clean -ffdx` semantics), the next provision prunes the stale
--- registration and re-creates the worktree at the same path from the
--- surviving branch.
+-- adoption behaves as before; plus the stale-registration case: the
+-- forced clean runs while the worktree is still registered (teardown
+-- moved after it), the registration's survival is asserted, and the
+-- next provision prunes the stale registration and re-creates the
+-- worktree at the same path from the surviving branch; plus the
+-- locked-stale case: a locked registration survives prune, so
+-- provision raises instead of adopting the nonexistent path.
 --
 -- Everything runs against a throwaway local git setup (a bare `origin`,
 -- a `main` clone, an `updater` clone for advancing the remote), removed
@@ -236,18 +238,21 @@ local function runAll(base: string)
 	})
 	expect(autoAdopted.path == auto.path, "default-parent rerun adopts the same path")
 	expect(sh(`git -C {quote(autoAdopted.path)} rev-parse HEAD`) == autoHead, "default-parent adoption left HEAD untouched")
-	local autoRemoved = worktree.teardown(autoAdopted)
-	expect(autoRemoved.ok, `default-parent teardown ok: {tostring(autoRemoved.stderr)}`)
-	ptah.log("ok: default parent is <MAIN>/.ptah/worktree, auto-created; adoption and teardown behave as before")
+	ptah.log("ok: default parent is <MAIN>/.ptah/worktree, auto-created; adoption behaves as before")
 
 	-- -----------------------------------------------------------------
-	-- Case: stale registration — the worktree directory deleted
-	-- out-of-band (`git clean -ffdx` semantics), the next provision
-	-- prunes the registration and re-creates the worktree at the same
-	-- path from the surviving branch.
+	-- Case: stale registration — the forced clean runs while the
+	-- worktree is still registered (teardown moved after it, so the
+	-- out-of-band delete leaves a stale registration behind, not a
+	-- clean slate): provision prunes the registration and re-creates
+	-- the worktree at the same path from the surviving branch.
 	-- -----------------------------------------------------------------
 	sh(`git -C {quote(MAIN)} clean -ffdx`)
 	expect(sh(`test -e {quote(auto.path)}; echo $?`) == "1", "forced clean removed the nested worktree directory")
+	expect(
+		string.find(sh(`git -C {quote(MAIN)} worktree list --porcelain`), `{auto.path}`, 1, true) ~= nil,
+		"the stale registration survived the clean (this is what the self-heal consumes)"
+	)
 	local healed = worktree.provision({
 		repo = MAIN,
 		name = "auto-1",
@@ -259,6 +264,42 @@ local function runAll(base: string)
 	expect(sh(`git -C {quote(healed.path)} rev-parse HEAD`) == autoHead, "re-created worktree attached to the surviving branch's commit")
 	expect(sh(`git -C {quote(healed.path)} rev-parse --abbrev-ref HEAD`) == "auto-1", "re-created worktree is on branch auto-1")
 	ptah.log("ok: stale registration (directory deleted out-of-band) pruned; worktree re-created at the same path")
+	-- Teardown at the default location, now that the clean cannot race it.
+	local autoRemoved = worktree.teardown(healed)
+	expect(autoRemoved.ok, `default-parent teardown ok: {tostring(autoRemoved.stderr)}`)
+
+	-- -----------------------------------------------------------------
+	-- Case: locked stale registration — git's prune skips locked
+	-- worktrees, so the self-heal cannot clear the registration:
+	-- provision raises instead of adopting the nonexistent path, and
+	-- the registration is left for its owner to unlock.
+	-- -----------------------------------------------------------------
+	local locked = worktree.provision({
+		repo = MAIN,
+		name = "locked-1",
+		ref = "origin/main",
+		branch = "locked-1",
+	})
+	sh(`git -C {quote(MAIN)} worktree lock {quote(locked.path)}`)
+	sh(`rm -rf {quote(locked.path)}`)
+	local lockedOk, lockedErr = pcall(function()
+		return worktree.provision({
+			repo = MAIN,
+			name = "locked-1",
+			ref = "origin/main",
+			branch = "locked-1",
+		})
+	end)
+	expect(lockedOk == false, `locked stale provision raised (got {tostring(lockedErr)})`)
+	expect(
+		string.find(tostring(lockedErr), "locked", 1, true) ~= nil,
+		`locked stale error names the lock: {tostring(lockedErr)}`
+	)
+	expect(
+		string.find(sh(`git -C {quote(MAIN)} worktree list --porcelain`), `{locked.path}`, 1, true) ~= nil,
+		"the locked registration survives (provision never unlocks)"
+	)
+	ptah.log("ok: locked stale registration raises; registration left for its owner")
 	return nil
 end
 

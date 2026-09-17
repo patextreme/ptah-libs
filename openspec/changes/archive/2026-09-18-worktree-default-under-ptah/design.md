@@ -109,10 +109,11 @@ directory there, finds the surviving `issue-<n>` branch, and attaches it
 as-is (or fast-forwards it when `ref` is its remote counterpart). The old
 sibling directory stays registered in git's worktree list until a human
 removes it (`git worktree remove <old-path>` + `prune`, or plain `rm` +
-`prune`); the module deliberately does not sweep registrations beyond
-the derived path it is about to use (D5) — silent destruction is the
-failure class the lifecycle exists to prevent. Documented in the
-README; no code.
+`prune`) — or until a stale-triggered provision prunes it alongside its
+own stale registration (D5): the trigger is the derived path, but git's
+prune is repo-wide and removes only registrations whose directories are
+already gone, so silent destruction of anything alive stays the failure
+class the lifecycle exists to prevent. Documented in the README; no code.
 
 ### D5 — Stale registrations self-heal: prune, then the usual order
 
@@ -126,10 +127,14 @@ now checks the derived path when a registration exists for it:
 directory gone means prune the stale registration and fall through to
 the usual resolution order, which re-creates the worktree at the same
 path from the surviving branch (attach-as-is, or
-fast-forward-or-fail when `ref` is its remote counterpart). No new
-failure modes: teardown already prunes best-effort, and a locked stale
-registration survives `prune` and makes the subsequent
-`worktree add` fail loudly.
+fast-forward-or-fail when `ref` is its remote counterpart). The check
+re-reads the registration after the prune: a stale registration that
+survives it — a locked worktree, which git's prune always skips so
+one on an unmounted device or network share keeps its admin files —
+makes provision raise instead of adopt; unlocking is the registration
+owner's decision, never provision's. No new silent failure modes:
+teardown already prunes best-effort, and the raise keeps the spec's
+absolute rule — adoption never returns a path that does not exist.
 
 ## Risks / Trade-offs
 
@@ -137,7 +142,8 @@ registration survives `prune` and makes the subsequent
   shared checkout, losing uncommitted state] → documented trade-off with
   the `parent` opt-out; branches (the durable artifact) survive any
   clean, and the next provision prunes the stale registration and
-  re-creates the worktree (D5).
+  re-creates the worktree (D5; a locked stale registration raises
+  instead).
 - [A consumer without the ignore rule sees worktrees as untracked noise,
   and agents may commit the nested checkout's `.git` file as an embedded
   repo] → declared environment requirement in spec + README; the factory

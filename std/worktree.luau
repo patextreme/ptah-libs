@@ -6,8 +6,10 @@
 -- Policy as parameters, with safe defaults: `provision` adopts an
 -- existing worktree as-is, prunes a stale registration (one whose
 -- directory a `git clean -ffdx` or a manual `rm` deleted) and
--- re-creates the worktree, fast-forwards-or-fails an existing branch
--- against its remote counterpart, and never resets or renames;
+-- re-creates the worktree — or raises when the registration survives
+-- the prune (a locked worktree; unlocking is never provision's act) —
+-- fast-forwards-or-fails an existing branch against its remote
+-- counterpart, and never resets or renames;
 -- `teardown` refuses a dirty worktree by default and never touches
 -- branches (unpushed commits survive on the local branch).
 --
@@ -18,8 +20,9 @@
 -- directories (a plain `git clean -fdx` skips nested repositories;
 -- branches survive in the shared object store; uncommitted state does
 -- not; the next provision prunes the stale registration and re-creates
--- the worktree), and a consumer who cannot accept that passes `parent`
--- explicitly to place worktrees outside every checkout.
+-- the worktree — a locked registration raises instead), and a consumer
+-- who cannot accept that passes `parent` explicitly to place worktrees
+-- outside every checkout.
 --
 -- Failure is asymmetric on purpose: `provision` raises carrying git's
 -- stderr (a failed provision means the run cannot proceed, pcall-able);
@@ -229,6 +232,14 @@ local function provision(options: ProvisionOptions): Worktree
 		-- the worktree at the same path.
 		git(root, { "worktree", "prune" })
 		registered = registeredWorktrees(root)
+		if registered.paths[path] then
+			-- The prune kept it: a locked stale registration (git skips
+			-- locked worktrees so one on an unmounted device or network
+			-- share keeps its admin files). Raising beats adopting a
+			-- nonexistent path, and unlocking is the registration
+			-- owner's decision, never provision's.
+			error(`worktree: {path} is registered but its directory is gone and the registration survived prune (a locked worktree?); unlock it or run git worktree prune by hand`)
+		end
 	end
 
 	if registered.paths[path] then

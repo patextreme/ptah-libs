@@ -37,7 +37,9 @@ uncommitted state does not), and a consumer who cannot accept that passes
 `parent` explicitly to place worktrees outside the checkout. When such a
 removal (or a manual one) leaves a registration whose directory is gone,
 provision SHALL prune the stale registration and re-create the worktree
-at the same path — adoption never returns a path that does not exist.
+at the same path; when the registration survives the prune (a locked
+worktree), provision SHALL raise — unlocking is never provision's act,
+and adoption never returns a path that does not exist.
 
 Provision SHALL resolve in this order, and SHALL never reset an adopted
 worktree or branch — a crashed run's unpushed commits are never silently
@@ -46,7 +48,8 @@ destroyed:
 - a registered worktree at the path whose directory is gone (a forced
   clean, a manual removal) is a **stale registration**: it is pruned and
   resolution falls through, re-creating the worktree at the same path
-  from its surviving branch;
+  from its surviving branch; a stale registration that survives the
+  prune (a locked worktree) raises — it is never unlocked;
 - a registered worktree at the path is **adopted as-is** (its branch must
   match; a mismatch, or an unregistered directory at the path, raises);
 - otherwise, when the local branch exists and `ref` is its remote-tracking
@@ -101,6 +104,11 @@ converged loop is something the caller logs, not a failed run.
 
 - **WHEN** a worktree is registered at the derived path but its directory is gone (a `git clean -ffdx` or a manual removal)
 - **THEN** provision prunes the stale registration and re-creates the worktree at the same path from the surviving branch, with the attach-as-is and fast-forward-or-fail rules applying as usual
+
+#### Scenario: Locked stale registration raises
+
+- **WHEN** a worktree is registered at the derived path, its directory is gone, and the registration survives the prune (a locked worktree)
+- **THEN** provision raises and the locked registration is left for its owner to unlock
 
 #### Scenario: Existing branch fast-forwards against its remote counterpart
 

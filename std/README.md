@@ -22,7 +22,8 @@ repo. See `../README.md` for the library contract and consumption model.
   `git clean -ffdx` in the shared checkout deletes the nested worktrees
   (a plain `git clean -fdx` skips nested repositories; branches
   survive; uncommitted state does not; the next provision prunes the
-  stale registration and re-creates the worktree).
+  stale registration and re-creates the worktree, while a locked
+  registration raises instead).
   Migrating from the old sibling default (`../<repo>-<name>`): the
   next provision attaches the surviving branch at the new location;
   retire each leftover sibling directory by hand with

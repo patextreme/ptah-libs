@@ -240,8 +240,8 @@ repository's own `.ptah` directory, where the rule keeps them out of
 (`git clean -ffdx` deletes nested worktrees — a plain `git clean -fdx`
 skips nested repositories; branches survive, uncommitted state does not,
 and the next provision re-creates the worktree from the surviving
-branch) — pass `parent` explicitly to place worktrees outside every
-checkout.
+branch, while a locked stale registration raises instead) — pass
+`parent` explicitly to place worktrees outside every checkout.
 
 ```lua
 local libs = require("./luau_packages/ptah_libs")
