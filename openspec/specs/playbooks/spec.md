@@ -895,31 +895,35 @@ the token SHALL have permission to edit assignees — triage access or
 higher — in the target repository, likewise declared).
 
 Eligibility SHALL consider exactly three signals: the queue label is
-present, the issue is assigned to the run's own authenticated gh account,
-and the issue carries no claim marker comment. The account SHALL be the
-authenticated identity itself — no config field — so the eligibility
-filter and the claim share one identity. "Assigned" means the account is
-among the issue's assignees, not its sole assignee: a teammate cc'd as
-assignee leaves the issue eligible. No triage verdict or other signal
-SHALL affect eligibility. The scan SHALL consider every labeled issue
-assigned to the authenticated account, not only a fixed-size first page,
-and the playbook SHALL order eligible issues oldest-first by issue
-number, deterministically, regardless of queue size. The scan MAY narrow
-candidates server-side by assignee; the client-side assignee check SHALL
-be the authoritative eligibility signal.
+present, the issue is not foreign-assigned, and the issue carries no
+claim marker comment. The account SHALL be the authenticated identity
+itself — no config field — so the foreign-assignment check and the claim
+share one identity. "Foreign-assigned" means the issue has assignees and
+none of them is the authenticated account: an unassigned issue is
+eligible, an issue whose assignees include the account is eligible
+(whether or not a teammate is cc'd alongside it), and only an issue
+assigned exclusively to other accounts is ineligible. No triage verdict
+or other signal SHALL affect eligibility. The scan SHALL consider every
+labeled issue — the whole labeled queue, not only a fixed-size first
+page, and regardless of queue size — and the playbook SHALL order
+eligible issues oldest-first by issue number, deterministically. The
+scan SHALL NOT narrow candidates server-side by assignee (the issues
+endpoint takes a single `assignee` term and cannot express "none or
+mine" as a union); the client-side foreign-assignment check SHALL be the
+only assignment signal.
 
 The `pickUp` operation SHALL accept either no argument (scan and claim
 the oldest eligible issue) or an issue number (claim that issue only if
 eligible). The operation SHALL return a typed outcome discriminated on
 `status`: `claimed` carrying the pickup brief, or `no-eligible-issue`
 carrying the scan summary (the count of issues examined under the full
-eligibility scope — labeled and assigned to the authenticated account).
-A scan that finds no eligible issue SHALL return the `no-eligible-issue`
-outcome rather than raising.
+eligibility scope — labeled and not foreign-assigned). A scan that finds
+no eligible issue SHALL return the `no-eligible-issue` outcome rather
+than raising.
 
 When no eligible issue exists for a requested issue number, the operation
-SHALL raise an error stating the reason (missing queue label, not
-assigned to the authenticated account, or already claimed).
+SHALL raise an error stating the reason (missing queue label, assigned
+to another account, or already claimed).
 
 #### Scenario: Consumer configures the queue label
 
@@ -928,17 +932,22 @@ assigned to the authenticated account, or already claimed).
 
 #### Scenario: Oldest eligible issue is picked up
 
-- **WHEN** `pickUp` is called with no argument and the queue holds issues 12 and 7 carrying the queue label, both assigned to the authenticated account, neither claimed
+- **WHEN** `pickUp` is called with no argument and the queue holds issues 12 and 7 carrying the queue label, both unassigned, neither claimed
 - **THEN** issue 7 is claimed and the `claimed` outcome carrying its brief is returned
 
 #### Scenario: Oldest-first spans the whole queue
 
-- **WHEN** `pickUp` is called with no argument against a queue larger than one page where an older labeled issue assigned to the authenticated account carries a claim marker (e.g. issue 3) and a newer unclaimed one assigned to the account follows past the page boundary (e.g. issue 40)
+- **WHEN** `pickUp` is called with no argument against a queue larger than one page where an older labeled issue carries a claim marker (e.g. issue 3) and a newer unclaimed unassigned one follows past the page boundary (e.g. issue 40)
 - **THEN** the oldest *eligible* issue is claimed, proving the scan reads the whole queue and skips claimed issues rather than only the first page
 
-#### Scenario: Unassigned or foreign-assigned issues are invisible
+#### Scenario: Unassigned issues are eligible
 
-- **WHEN** the queue holds labeled, unclaimed issues that are assigned to no one or to another account
+- **WHEN** the queue holds a labeled, unclaimed issue with no assignees
+- **THEN** the issue is eligible for pickup by any runner account's runs
+
+#### Scenario: Exclusively foreign-assigned issues are invisible
+
+- **WHEN** the queue holds labeled, unclaimed issues assigned only to other accounts
 - **THEN** those issues are not eligible: the scan does not examine them for claims and posts nothing on them
 
 #### Scenario: Among-assignees eligibility
@@ -948,12 +957,12 @@ assigned to the authenticated account, or already claimed).
 
 #### Scenario: No eligible issue returns a distinct outcome
 
-- **WHEN** `pickUp` is called with no argument and every labeled issue assigned to the authenticated account is already claimed (or none carry the queue label, or none are assigned to the account)
+- **WHEN** `pickUp` is called with no argument and every labeled issue that is not foreign-assigned is already claimed (or none carry the queue label, or every labeled issue is assigned only to other accounts)
 - **THEN** the operation returns a no-eligible-issue outcome carrying the scan summary, and raises nothing
 
 #### Scenario: Explicit number that is not eligible
 
-- **WHEN** `pickUp` is called with the number of an issue that lacks the queue label, is not assigned to the authenticated account, or is already claimed
+- **WHEN** `pickUp` is called with the number of an issue that lacks the queue label, is assigned only to other accounts, or is already claimed
 - **THEN** the operation raises an error stating which eligibility condition failed
 
 ### Requirement: Issue claim protocol

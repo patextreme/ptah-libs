@@ -91,17 +91,20 @@ back.
 _Avoid_: assignment (the routing signal below), lock, reservation
 
 **Assignment**:
-GitHub's assignee field as the pickup scope: an issue is picked up only
-by a run whose authenticated account is among the issue's assignees. A
-human sets it to route the issue; the winning run records itself on
-claim, and the playbook removes no one.
+GitHub's assignee field as the pickup scope: an issue is eligible unless
+it is foreign-assigned — it has assignees and none of them is the run's
+authenticated account. An unassigned queue issue is eligible to every
+runner account; a human sets assignees to steer an issue to one account
+or away from others; the winning run records itself on claim, and the
+playbook removes no one.
 _Avoid_: claim (the marker protocol, not the routing), owner (repo owner
 is a different concept)
 
 **Eligibility**:
-The three-signal gate before a claim attempt: queue label present, the
-authenticated account among the assignees, no claim marker comment. Only
-the marker signal needs a second read.
+The three-signal gate before a claim attempt: queue label present, not
+foreign-assigned (no assignees, or the authenticated account among
+them), no claim marker comment. Only the marker signal needs a second
+read.
 _Avoid_: readiness (the queue label alone), triage (out of scope)
 
 **Escalated**:

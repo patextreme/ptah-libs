@@ -1,27 +1,34 @@
 # issue playbook
 
 Agent-free issue pickup. Scan a repo-configured **queue label** and claim
-the oldest eligible issue assigned to the run's own account, returning a
-typed **pickup brief**. The intelligence is the claim protocol — a marked
-comment plus an earliest-wins read-back — not a prompt, so the playbook
-creates no sessions, ships no judge, and asks nothing.
+the oldest eligible issue in it, returning a typed **pickup brief**. The
+intelligence is the claim protocol — a marked comment plus an
+earliest-wins read-back — not a prompt, so the playbook creates no
+sessions, ships no judge, and asks nothing.
 
 `pickUp` is the whole playbook: scan → claim → brief. Everything else
 (triage, reclaim, a release protocol, run-id identity, orchestration to a
-reviewed PR) is deliberately deferred. Two decisions are recorded in
+reviewed PR) is deliberately deferred. The decisions are recorded in
 [`docs/adr/0002-issue-claims-earliest-marker-wins.md`](../../docs/adr/0002-issue-claims-earliest-marker-wins.md)
-(the claim protocol) and
+(the claim protocol),
 [`docs/adr/0003-pickup-scoped-to-own-assignments.md`](../../docs/adr/0003-pickup-scoped-to-own-assignments.md)
-(the assignment scope).
+(the assignment scope, as first drawn), and
+[`docs/adr/0004-pickup-eligible-unless-foreign-assigned.md`](../../docs/adr/0004-pickup-eligible-unless-foreign-assigned.md)
+(its amendment: only foreign-assigned issues are ineligible).
 
-> **BREAKING — pickup is scoped to the runner's own assignments.**
-> Assignment is the routing signal: a run picks up only issues whose
-> assignees include its own authenticated `gh` account. A queue whose
-> issues are **unassigned** (or assigned to someone else) is now invisible
-> to that run: `pickUp` claims nothing and returns `no-eligible-issue`
-> with `scanned: 0`. This is a clean break, like the `prReviewLoop` →
-> `pr` rename: pre-assign queued issues to the runner's account, or pin
-> the prior tag to defer the upgrade. No config field was added.
+> **BREAKING — unassigned queue issues are now eligible.** Previously
+> (ADR 0003) a run picked up only issues whose assignees included its own
+> authenticated `gh` account, so labeling a ticket was not enough — a
+> human also had to assign it to the exact account that would run the
+> factory, and an unassigned queue read as empty (`scanned: 0`, like a
+> genuinely empty queue). Eligibility is now **the labeled queue minus
+> foreign-assigned issues**: no assignees → eligible (visible to *every*
+> runner account), the account among the assignees → eligible (a teammate
+> cc'd alongside is not a foreign assignee), assigned only to other
+> accounts → invisible. Cross-account contention on unassigned issues is
+> decided by the earliest-claim read-back, and a loser writes nothing but
+> its own marker. Pin the prior tag to defer the upgrade. No config field
+> was added.
 
 ## The queue and eligibility
 
@@ -29,31 +36,30 @@ The **queue label** is a required config value with no default: the label
 vocabulary is the repository's, never the playbook's. It is a human's
 assertion that an issue is ready for development.
 
-The scan reads **every** open issue carrying the queue label **and
-assigned to the run's own authenticated account** through the REST issues
-endpoint (`gh api --paginate --slurp repos/{owner}/{repo}/issues` with
-`state=open`, `sort=created`, `direction=asc`, `labels=<queueLabel>`,
-`assignee=<login>`), flattens the pages, drops pull requests (they share
-the issues endpoint), and orders candidates by issue number ascending.
-That whole-queue read is why the scan does not use `gh issue list`: its
-returned window is capped and newest-first, so it cannot carry "oldest
-first" for a queue larger than one page.
+The scan reads **every** open issue carrying the queue label through the
+REST issues endpoint (`gh api --paginate --slurp
+repos/{owner}/{repo}/issues` with `state=open`, `sort=created`,
+`direction=asc`, `labels=<queueLabel>`), flattens the pages, drops pull
+requests (they share the issues endpoint), and orders candidates by issue
+number ascending. That whole-queue read is why the scan does not use
+`gh issue list`: its returned window is capped and newest-first, so it
+cannot carry "oldest first" for a queue larger than one page.
 
 The scan first resolves the runner's identity from `gh api /user` →
-`login`, because the issues endpoint rejects the literal `@me` with a
-`422`. One identity then serves both the scan filter and the claim. The
-`assignee=<login>` parameter narrows the payload server-side; the
-**client-side** assignee check (reading each issue's `assignees` array)
-stays authoritative, so eligibility is exact regardless of parameter
-semantics.
+`login`. One identity then serves both the foreign-assignment check and
+the claim. There is **no** server-side assignee narrowing: the issues
+endpoint takes a single `assignee` term and cannot express "unassigned
+**or** mine" as a union, so the **client-side** check (reading each
+issue's `assignees` array) is the only assignment signal.
 
 Eligibility considers exactly three signals:
 
 1. the queue label is present,
-2. the issue is **assigned to the run's own authenticated account** —
-   *among* the issue's assignees, not necessarily its sole assignee: a
-   teammate cc'd as assignee leaves the issue eligible (contention stays
-   the marker protocol's job), and
+2. the issue is **not assigned to another account** — no assignees at
+   all, or the run's own authenticated account *among* the issue's
+   assignees (a teammate cc'd alongside it is not a foreign assignee);
+   only an issue assigned exclusively to other accounts is ineligible
+   (contention stays the marker protocol's job), and
 3. the issue carries **no claim marker comment**.
 
 Only the third signal needs a comments read. Nothing else — no triage
@@ -76,7 +82,7 @@ account is the identity and the comment's platform timestamps carry order.
 The claim marker comment is the **source of truth for claimedness**.
 
 Each attempt (`pickUp`, per candidate) runs the checks in order — queue
-label → assigned-to-me → claim marker — then:
+label → foreign-assignment → claim marker — then:
 
 1. **Pre-check** — read the candidate's comments; if any claim marker
    exists, the issue is ineligible and the run moves to the next
@@ -132,16 +138,17 @@ claim marker comment** on it, which returns it to eligibility.
     verdict.
   - `{ status = "no-eligible-issue", scanned = <count> }` — the scan
     found nothing eligible. `scanned` counts the issues **examined under
-    the full scope** — carrying the queue label *and* assigned to the
-    runner's account — not the whole labeled queue. An ops note:
-    **`scanned: 0` means nothing in the queue is assigned to the runner's
-    account** (diagnose with `gh issue list -l <queueLabel>`). Scanning an
-    empty or entirely foreign queue never raises.
+    the full scope** — carrying the queue label *and* not assigned to
+    another account — not the whole labeled queue. An ops note:
+    **`scanned: 0` means every labeled issue in the queue is assigned to
+    other accounts (or the queue is empty)** (diagnose with
+    `gh issue list -l <queueLabel>`). Scanning an empty or entirely
+    foreign queue never raises.
 - `ops:pickUp(number)` — claim that issue by number, only if eligible. A
   miss raises with the reason: the issue **lacks the queue label**, is
-  **not assigned to you**, or is **already claimed** (including a lost
-  contention). Explicit mode never returns `no-eligible-issue`, and a miss
-  posts nothing.
+  **assigned to another account**, or is **already claimed** (including a
+  lost contention). Explicit mode never returns `no-eligible-issue`, and
+  a miss posts nothing.
 
 ## Config (data only)
 
@@ -185,9 +192,9 @@ always the authenticated identity.
   the consumer repo), and `gh` with no `--repo` targets that repo;
   `GH_REPO` overrides as usual. There is no repo field in config.
 - **Concurrent runners are safe** — the earliest-claim read-back makes
-  pickup safe under concurrent runners; a loser backs off. Same-account
-  concurrency is the common case; cross-account contention is possible
-  (eligibility is "among the assignees") and the same marker protocol
+  pickup safe under concurrent runners; a loser backs off. Cross-account
+  contention is the common case on unassigned queue issues (eligibility
+  no longer scopes the queue to one account) and the same marker protocol
   decides it.
 - **One claim per issue is the expectation** — the protocol guarantees at
   most one *winner* per issue, but a contended issue carries the loser's

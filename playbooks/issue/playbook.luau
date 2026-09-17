@@ -6,22 +6,23 @@
 -- vocabulary. See README.md in this directory for the declared environment
 -- requirements and the claim protocol summary;
 -- docs/adr/0002-issue-claims-earliest-marker-wins.md for the claim protocol
--- and docs/adr/0003-pickup-scoped-to-own-assignments.md for the assignment
--- scope.
+-- docs/adr/0003-pickup-scoped-to-own-assignments.md and
+-- docs/adr/0004-pickup-eligible-unless-foreign-assigned.md for the
+-- assignment scope.
 --
--- The scan reads every open issue carrying the queue label and assigned to
--- the run's own authenticated gh account through the REST issues endpoint
--- with `--paginate --slurp` (the `gh issue list` window is capped and
--- newest-first, so it cannot carry "oldest first" for a queue larger than
--- one page; the issues endpoint also rejects the literal `@me` — 422 — so
--- the login is resolved from `GET /user` first). It drops pull requests
--- (they share the endpoint) and applies the three-signal eligibility
--- filter: the queue label is present, the authenticated account is among
--- the issue's assignees, and the issue carries no claim marker comment.
--- The client-side assignee check is authoritative; the server-side
--- `assignee=<login>` param only narrows the payload. `claimedLabel`, when
--- configured, is added on claim for human-legible queue state only — it is
--- never a gate and never narrows the candidate set.
+-- The scan reads every open issue carrying the queue label through the REST
+-- issues endpoint with `--paginate --slurp` (the `gh issue list` window is
+-- capped and newest-first, so it cannot carry "oldest first" for a queue
+-- larger than one page). It drops pull requests (they share the endpoint)
+-- and applies the three-signal eligibility filter: the queue label is
+-- present, the issue is not foreign-assigned (no assignees, or the
+-- authenticated account among them), and the issue carries no claim marker
+-- comment. The client-side foreign-assignment check is the only assignment
+-- signal: the issues endpoint's `assignee` term is a single value and
+-- cannot express "none or mine" as a union, so the scan never narrows by
+-- assignee server-side. `claimedLabel`, when configured, is added on claim
+-- for human-legible queue state only — it is never a gate and never
+-- narrows the candidate set.
 --
 -- A claim is a dedicated comment carrying the `<!-- ptah:issue-claim -->`
 -- marker plus one fixed legible sentence (a bare marker renders as an empty
@@ -69,10 +70,11 @@ export type Claimed = {
 export type NoEligibleIssue = {
 	status: "no-eligible-issue",
 	-- The scan summary: how many issues were examined under the full
-	-- eligibility scope — carrying the queue label and assigned to the
-	-- authenticated account (pull requests dropped) — before none proved
-	-- eligible. `scanned: 0` means nothing in the queue is assigned to this
-	-- account. Not the whole labeled queue: the scan narrows server-side.
+	-- eligibility scope — carrying the queue label and not assigned to
+	-- another account (pull requests dropped) — before none proved
+	-- eligible. `scanned: 0` means every labeled issue in the queue is
+	-- assigned to other accounts (or the queue is empty). Not the whole
+	-- labeled queue: foreign-assigned issues never enter the count.
 	scanned: number,
 }
 
@@ -83,8 +85,8 @@ export type Outcome = Claimed | NoEligibleIssue
 export type Instance = {
 	-- Claim the oldest eligible issue (no argument), or claim a specific
 	-- issue by number only if eligible. An explicit miss (missing queue
-	-- label, not assigned to the authenticated account, already claimed, or
-	-- lost contention) raises with the reason.
+	-- label, assigned to another account, already claimed, or lost
+	-- contention) raises with the reason.
 	pickUp: (self: Instance, number: number?) -> Outcome,
 }
 
@@ -97,9 +99,8 @@ local CLAIM_BODY = MARKER .. "\n\nClaimed by a ptah run for automated pickup.\n"
 
 local ERROR_PREFIX = "issue-pickup"
 
--- Resolve the authenticated gh account's login. One identity serves both the
--- scan's assignee filter and the post-win self-assign; the issues endpoint
--- rejects the literal `@me` (422), so the login must be resolved. The caller
+-- Resolve the authenticated gh account's login. One identity serves both
+-- the foreign-assignment check and the post-win self-assign. The caller
 -- memoizes this per instance. A failed resolution raises through the
 -- transport's outcome, its stderr in the error.
 local function resolveLogin(): string
@@ -115,17 +116,19 @@ local function resolveLogin(): string
 end
 
 -- One scanned candidate: the brief fields plus the two client-side
--- eligibility checks (the label and the authoritative assignee check).
+-- eligibility checks (the label and the foreign-assignment check).
 type Candidate = {
 	number: number,
 	url: string,
 	title: string,
 	body: string,
 	hasQueueLabel: boolean,
-	-- The authenticated account is among the issue's assignees (not
-	-- necessarily its sole assignee). Authoritative over the server-side
-	-- `assignee=<login>` narrowing.
-	assignedToMe: boolean,
+	-- The issue is assigned only to other accounts: it has assignees and
+	-- none of them is the authenticated account. No assignees is not
+	-- foreign, and a teammate cc'd alongside the account is not foreign
+	-- (ADR 0003's among-not-sole rule). The only assignment signal: the
+	-- scan does not narrow by assignee server-side.
+	assignedElsewhere: boolean,
 }
 
 -- One claim attempt's result. `ineligible` and `lost` both mean "not this
@@ -136,7 +139,7 @@ type Attempt = {
 	brief: Brief,
 } | {
 	status: "ineligible",
-	reason: "label" | "not-assigned" | "claimed",
+	reason: "label" | "assigned-elsewhere" | "claimed",
 } | {
 	status: "lost",
 }
@@ -190,17 +193,24 @@ local function mapIssue(entry: any, queueLabel: string, login: string): Candidat
 			end
 		end
 	end
-	-- "Among the assignees", not sole: a teammate cc'd as assignee leaves the
-	-- issue eligible. This check is authoritative over the server-side
-	-- `assignee=<login>` narrowing.
-	local assignedToMe = false
+	-- Foreign-assigned: the issue has assignees and none of them is the
+	-- authenticated account. No assignees is not foreign, and a teammate
+	-- cc'd alongside the account is not foreign (ADR 0003's among-not-sole
+	-- rule). This client-side check is the only assignment signal.
+	local assignedElsewhere = false
 	local assignees = entry.assignees
 	if type(assignees) == "table" then
+		local any = false
+		local mine = false
 		for _, assignee in assignees do
-			if type(assignee) == "table" and assignee.login == login then
-				assignedToMe = true
+			if type(assignee) == "table" then
+				any = true
+				if assignee.login == login then
+					mine = true
+				end
 			end
 		end
+		assignedElsewhere = any and not mine
 	end
 	return {
 		number = entry.number,
@@ -208,16 +218,17 @@ local function mapIssue(entry: any, queueLabel: string, login: string): Candidat
 		title = if type(entry.title) == "string" then entry.title else "",
 		body = if type(entry.body) == "string" then entry.body else "",
 		hasQueueLabel = hasQueueLabel,
-		assignedToMe = assignedToMe,
+		assignedElsewhere = assignedElsewhere,
 	}
 end
 
--- The whole assigned slice of the labeled queue, oldest first by issue
--- number. `{owner}`/`{repo}` resolve from the invocation directory (or
--- `GH_REPO`), exactly like bare `gh`, so config carries no repo field.
--- `assignee=<login>` narrows the payload server-side (`@me` is rejected);
--- the client-side assignee check stays authoritative. `--method GET` is
--- explicit: `gh api` defaults to POST as soon as a `-f` field is present.
+-- The whole labeled queue, oldest first by issue number. `{owner}`/`{repo}`
+-- resolve from the invocation directory (or `GH_REPO`), exactly like bare
+-- `gh`, so config carries no repo field. No server-side assignee narrowing:
+-- the issues endpoint takes a single `assignee` term and cannot express
+-- "none or mine" as a union, so the client-side foreign-assignment check
+-- decides over the full labeled queue. `--method GET` is explicit: `gh api`
+-- defaults to POST as soon as a `-f` field is present.
 local function listCandidates(queueLabel: string, login: string): { Candidate }
 	local outcome = gh.run({
 		"api",
@@ -234,11 +245,9 @@ local function listCandidates(queueLabel: string, login: string): { Candidate }
 		"direction=asc",
 		"-f",
 		`labels={queueLabel}`,
-		"-f",
-		`assignee={login}`,
 	}, { json = true })
 	if not outcome.ok then
-		error(`{ERROR_PREFIX}: could not list issues carrying the queue label "{queueLabel}" assigned to "{login}": {outcome.stderr}`)
+		error(`{ERROR_PREFIX}: could not list issues carrying the queue label "{queueLabel}": {outcome.stderr}`)
 	end
 	local candidates: { Candidate } = {}
 	for _, entry in flattenPages(outcome.json) do
@@ -391,7 +400,7 @@ local function earliestClaim(comments: { any }): { id: number, createdAt: string
 	return best
 end
 
--- One claim attempt: queue label → assigned-to-me → claim marker, then
+-- One claim attempt: queue label → foreign-assignment → claim marker, then
 -- post → read-back → winners-only writes. Only the marker signal needs a
 -- comments read. Nothing but the marker is written before the read-back
 -- confirms the win; a winner then self-assigns and, when configured, adds
@@ -401,8 +410,8 @@ local function attempt(candidate: Candidate, login: string, claimedLabel: string
 	if not candidate.hasQueueLabel then
 		return { status = "ineligible", reason = "label" }
 	end
-	if not candidate.assignedToMe then
-		return { status = "ineligible", reason = "not-assigned" }
+	if candidate.assignedElsewhere then
+		return { status = "ineligible", reason = "assigned-elsewhere" }
 	end
 
 	local precheck = listComments(candidate.number)
@@ -472,8 +481,8 @@ function M.new(config: Config): Instance
 					if result.reason == "label" then
 						error(`{ERROR_PREFIX}: #{number} does not carry the queue label "{queueLabel}"`)
 					end
-					if result.reason == "not-assigned" then
-						error(`{ERROR_PREFIX}: #{number} is not assigned to you`)
+					if result.reason == "assigned-elsewhere" then
+						error(`{ERROR_PREFIX}: #{number} is assigned to another account`)
 					end
 					error(`{ERROR_PREFIX}: #{number} is already claimed`)
 				end
@@ -482,10 +491,10 @@ function M.new(config: Config): Instance
 
 			local candidates = listCandidates(queueLabel, me)
 			-- The scan summary counts issues examined under the full scope:
-			-- labeled and assigned to the authenticated account.
+			-- labeled and not assigned to another account.
 			local scanned = 0
 			for _, candidate in candidates do
-				if candidate.hasQueueLabel and candidate.assignedToMe then
+				if candidate.hasQueueLabel and not candidate.assignedElsewhere then
 					scanned += 1
 				end
 			end
@@ -494,8 +503,8 @@ function M.new(config: Config): Instance
 				if result.status == "claimed" then
 					return result
 				end
-				-- Ineligible (label, not-assigned, or claimed) or lost: back
-				-- off to the next candidate.
+				-- Ineligible (label, assigned-elsewhere, or claimed) or lost:
+				-- back off to the next candidate.
 			end
 			return { status = "no-eligible-issue", scanned = scanned }
 		end,
