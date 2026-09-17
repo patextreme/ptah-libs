@@ -126,8 +126,10 @@ type Worktree = {
 
 -- Each issue is implemented in its own worktree on the branch `issue-<n>`,
 -- branched off WORKTREE_REF, so agent edits, commits, and pushes never touch
--- the shared checkout (the path is `<sibling of the repo root>/<repo
--- basename>-issue-<n>`, outside any checkout). A rerun adopts the registered
+-- the shared checkout (the path is `<repo root>/.ptah/worktree/<repo
+-- basename>-issue-<n>`, under the repository's own ptah directory — the
+-- shared checkout's `.gitignore` must carry `.ptah/worktree/`). A rerun
+-- adopts the registered
 -- worktree or attaches the surviving branch as-is — an interrupted run
 -- resumes without anything being reset.
 local function prepareWorktree(brief: Brief): Worktree
