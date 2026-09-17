@@ -5,8 +5,9 @@
 See `proposal.md` (Why). One prior decision governs this area: D9 of
 `worktree-aware-playbooks` (archived) chose the repository root's sibling
 as the default `parent`, rejecting inside-the-repo paths on two grounds —
-untracked noise in every checkout, and `git clean -fdx` over nested
-registered worktrees being "not a fact to build on". This change reverses
+untracked noise in every checkout, and aggressive cleans (`git clean
+-ffdx`) over nested registered worktrees being "not a fact to build on".
+This change reverses
 that default and records why the reversal is acceptable.
 
 The implementation surface is small: `std/worktree.luau:185` computes
@@ -59,11 +60,13 @@ truth, the explicit-`parent` escape hatch.) D9's two grounds, revisited:
   (`.ptah/worktree/`) in the one checkout that hosts the default parent.
   The factory's committer prompt already excludes `.ptah` from commits,
   so agent-driven commits never sweep a nested worktree in.
-- *`git clean -fdx` over nested worktrees* — now an accepted, documented
-  trade-off instead of a disqualifier: a clean of the shared checkout
-  deletes the worktree directories (branches survive in the shared object
-  store; uncommitted state does not). Consumers who run aggressive cleans
-  pass `parent` explicitly. The sibling default was never a guard against
+- *`git clean -ffdx` over nested worktrees* — now an accepted, documented
+  trade-off instead of a disqualifier: a clean with `-ff` (a plain
+  `git clean -fdx` skips nested repositories) deletes the worktree
+  directories (branches survive in the shared object store; uncommitted
+  state does not; the next provision prunes the stale registration and
+  re-creates the worktree, D5). Consumers who run aggressive cleans pass
+  `parent` explicitly. The sibling default was never a guard against
   data loss — teardown's refuse-dirty and never-touch-branches contracts
   are, and those are unchanged.
 
@@ -106,15 +109,35 @@ directory there, finds the surviving `issue-<n>` branch, and attaches it
 as-is (or fast-forwards it when `ref` is its remote counterpart). The old
 sibling directory stays registered in git's worktree list until a human
 removes it (`git worktree remove <old-path>` + `prune`, or plain `rm` +
-`prune`); the module deliberately does not sweep for stale registrations
-— silent destruction is the failure class the lifecycle exists to
-prevent. Documented in the README; no code.
+`prune`); the module deliberately does not sweep registrations beyond
+the derived path it is about to use (D5) — silent destruction is the
+failure class the lifecycle exists to prevent. Documented in the
+README; no code.
+
+### D5 — Stale registrations self-heal: prune, then the usual order
+
+The nested default makes out-of-band deletions routine: a
+`git clean -ffdx` (or a manual `rm -rf .ptah`) removes a registered
+worktree's directory while git's registration survives, marked
+"prunable". The adopt branch keyed on the registration alone, so the
+next provision "succeeded" while returning a nonexistent path — a
+silent failure only a manual `git worktree prune` cleared. Provision
+now checks the derived path when a registration exists for it:
+directory gone means prune the stale registration and fall through to
+the usual resolution order, which re-creates the worktree at the same
+path from the surviving branch (attach-as-is, or
+fast-forward-or-fail when `ref` is its remote counterpart). No new
+failure modes: teardown already prunes best-effort, and a locked stale
+registration survives `prune` and makes the subsequent
+`worktree add` fail loudly.
 
 ## Risks / Trade-offs
 
-- [Nested worktree directories are deletable by `git clean -fdx` in the
+- [Nested worktree directories are deletable by `git clean -ffdx` in the
   shared checkout, losing uncommitted state] → documented trade-off with
-  the `parent` opt-out; branches (the durable artifact) survive any clean.
+  the `parent` opt-out; branches (the durable artifact) survive any
+  clean, and the next provision prunes the stale registration and
+  re-creates the worktree (D5).
 - [A consumer without the ignore rule sees worktrees as untracked noise,
   and agents may commit the nested checkout's `.git` file as an embedded
   repo] → declared environment requirement in spec + README; the factory

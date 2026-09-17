@@ -4,7 +4,9 @@
 -- runs in their own checkout without managing git state by hand.
 --
 -- Policy as parameters, with safe defaults: `provision` adopts an
--- existing worktree as-is, fast-forwards-or-fails an existing branch
+-- existing worktree as-is, prunes a stale registration (one whose
+-- directory a `git clean -ffdx` or a manual `rm` deleted) and
+-- re-creates the worktree, fast-forwards-or-fails an existing branch
 -- against its remote counterpart, and never resets or renames;
 -- `teardown` refuses a dirty worktree by default and never touches
 -- branches (unpushed commits survive on the local branch).
@@ -12,10 +14,12 @@
 -- Worktrees default under the repository's own `.ptah/worktree/` — one
 -- conventional home for everything ptah-owned in a consumer repo. A
 -- worktree inside the checkout is an accepted, documented trade-off:
--- `git clean -fdx` in the shared checkout deletes nested worktree
--- directories (branches survive in the shared object store; uncommitted
--- state does not), and a consumer who cannot accept that passes
--- `parent` explicitly to place worktrees outside every checkout.
+-- `git clean -ffdx` in the shared checkout deletes nested worktree
+-- directories (a plain `git clean -fdx` skips nested repositories;
+-- branches survive in the shared object store; uncommitted state does
+-- not; the next provision prunes the stale registration and re-creates
+-- the worktree), and a consumer who cannot accept that passes `parent`
+-- explicitly to place worktrees outside every checkout.
 --
 -- Failure is asymmetric on purpose: `provision` raises carrying git's
 -- stderr (a failed provision means the run cannot proceed, pcall-able);
@@ -50,7 +54,7 @@ export type ProvisionOptions = {
 	-- Directory that will hold the worktree. Defaults to
 	-- `<repository root>/.ptah/worktree`, so worktrees live under the
 	-- repository's own ptah directory; pass a directory outside any
-	-- checkout when `git clean -fdx` over nested worktrees is
+	-- checkout when `git clean -ffdx` over nested worktrees is
 	-- unacceptable (branches survive a clean; uncommitted state does
 	-- not). A missing parent directory, intermediate directories
 	-- included, is created.
@@ -215,6 +219,18 @@ local function provision(options: ProvisionOptions): Worktree
 	end
 
 	local registered = registeredWorktrees(root)
+	if registered.paths[path] and not pathExists(path) then
+		-- Stale registration: a `git clean -ffdx` or a manual `rm`
+		-- deleted the worktree directory while the registration
+		-- survived (git marks it prunable). Adopting as-is would hand
+		-- back a path that no longer exists and would never self-heal,
+		-- so prune the stale registration and fall through — the
+		-- branch survives the deletion, and the checks below re-create
+		-- the worktree at the same path.
+		git(root, { "worktree", "prune" })
+		registered = registeredWorktrees(root)
+	end
+
 	if registered.paths[path] then
 		-- Adopt as-is: no reset, no re-add, so an interrupted run resumes.
 		local existing = registered.branches[path]

@@ -7,7 +7,11 @@
 -- unaffected), and adds the default-parent case: provision without
 -- `parent` against the throwaway repo lands at
 -- `<MAIN>/.ptah/worktree/main-<name>` with the parent auto-created, and
--- adoption and teardown behave as before.
+-- adoption and teardown behave as before; plus the stale-registration
+-- case: after the worktree directory is deleted out-of-band
+-- (`git clean -ffdx` semantics), the next provision prunes the stale
+-- registration and re-creates the worktree at the same path from the
+-- surviving branch.
 --
 -- Everything runs against a throwaway local git setup (a bare `origin`,
 -- a `main` clone, an `updater` clone for advancing the remote), removed
@@ -235,6 +239,26 @@ local function runAll(base: string)
 	local autoRemoved = worktree.teardown(autoAdopted)
 	expect(autoRemoved.ok, `default-parent teardown ok: {tostring(autoRemoved.stderr)}`)
 	ptah.log("ok: default parent is <MAIN>/.ptah/worktree, auto-created; adoption and teardown behave as before")
+
+	-- -----------------------------------------------------------------
+	-- Case: stale registration — the worktree directory deleted
+	-- out-of-band (`git clean -ffdx` semantics), the next provision
+	-- prunes the registration and re-creates the worktree at the same
+	-- path from the surviving branch.
+	-- -----------------------------------------------------------------
+	sh(`git -C {quote(MAIN)} clean -ffdx`)
+	expect(sh(`test -e {quote(auto.path)}; echo $?`) == "1", "forced clean removed the nested worktree directory")
+	local healed = worktree.provision({
+		repo = MAIN,
+		name = "auto-1",
+		ref = "origin/main",
+		branch = "auto-1",
+	})
+	expect(healed.path == auto.path, `stale registration heals to the same path: {healed.path}`)
+	expect(sh(`test -d {quote(healed.path)}; echo $?`) == "0", "re-created worktree directory exists")
+	expect(sh(`git -C {quote(healed.path)} rev-parse HEAD`) == autoHead, "re-created worktree attached to the surviving branch's commit")
+	expect(sh(`git -C {quote(healed.path)} rev-parse --abbrev-ref HEAD`) == "auto-1", "re-created worktree is on branch auto-1")
+	ptah.log("ok: stale registration (directory deleted out-of-band) pruned; worktree re-created at the same path")
 	return nil
 end
 

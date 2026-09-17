@@ -30,16 +30,23 @@ Because the default parent sits inside the repository's checkout, a
 git-ignored `<repo-root>/.ptah/worktree/` is a declared environment
 requirement, like `git` on PATH: without it, every worktree is untracked
 noise in `git status`. A worktree inside the checkout SHALL be treated as
-an accepted, documented trade-off: `git clean -fdx` in the shared
-checkout removes nested worktree directories (branches survive in the
-shared object store; uncommitted state does not), and a consumer who
-cannot accept that passes `parent` explicitly to place worktrees outside
-the checkout.
+an accepted, documented trade-off: `git clean -ffdx` in the shared
+checkout removes nested worktree directories (a plain `git clean -fdx`
+skips nested repositories; branches survive in the shared object store;
+uncommitted state does not), and a consumer who cannot accept that passes
+`parent` explicitly to place worktrees outside the checkout. When such a
+removal (or a manual one) leaves a registration whose directory is gone,
+provision SHALL prune the stale registration and re-create the worktree
+at the same path — adoption never returns a path that does not exist.
 
 Provision SHALL resolve in this order, and SHALL never reset an adopted
 worktree or branch — a crashed run's unpushed commits are never silently
 destroyed:
 
+- a registered worktree at the path whose directory is gone (a forced
+  clean, a manual removal) is a **stale registration**: it is pruned and
+  resolution falls through, re-creating the worktree at the same path
+  from its surviving branch;
 - a registered worktree at the path is **adopted as-is** (its branch must
   match; a mismatch, or an unregistered directory at the path, raises);
 - otherwise, when the local branch exists and `ref` is its remote-tracking
@@ -89,6 +96,11 @@ converged loop is something the caller logs, not a failed run.
 
 - **WHEN** the registered worktree at the path is on a different branch, or an unregistered directory sits at the path
 - **THEN** provision raises; adoption never silently switches or discards
+
+#### Scenario: Stale registration is pruned and the worktree re-created
+
+- **WHEN** a worktree is registered at the derived path but its directory is gone (a `git clean -ffdx` or a manual removal)
+- **THEN** provision prunes the stale registration and re-creates the worktree at the same path from the surviving branch, with the attach-as-is and fast-forward-or-fail rules applying as usual
 
 #### Scenario: Existing branch fast-forwards against its remote counterpart
 
