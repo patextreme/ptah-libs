@@ -191,13 +191,19 @@ end
 -- collapse (`pwd -P`), relative input resolves from the caller's chosen
 -- coordinate system, and a missing directory returns nil for the caller
 -- to fail loudly on. POSIX shell built-ins only (`test`, `cd`, `pwd`);
--- every dynamic value is single-quoted.
+-- every dynamic value is single-quoted. Exactly pwd's one trailing
+-- newline is stripped — never `trim()`: a trailing whitespace byte can
+-- belong to the path itself (`ts ` is a legal POSIX directory name), and
+-- stripping it would re-key the whole provision onto a mangled location
+-- that the post-create readback cannot catch (git registers the path it
+-- was handed). Every other byte, including embedded and trailing
+-- whitespace inside the path, survives exactly, like the inventory.
 local function physicalDir(dir: string): string?
 	local result = ptah.exec(`if test -d {quote(dir)}; then cd {quote(dir)} && pwd -P; else exit 64; fi`)
 	if result.exitCode ~= 0 then
 		return nil
 	end
-	return trim(result.stdout)
+	return (result.stdout:gsub("\n$", ""))
 end
 
 -- Provision a worktree, resolving in the order the spec fixes. Returns
