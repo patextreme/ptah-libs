@@ -246,13 +246,27 @@ never the shared tree's HEAD, so a worktree is never silently based on
 whatever the shared checkout happens to sit on), an optional `branch`
 (defaulting to the ref's short name for remote-tracking refs), an
 optional `fetch`, an optional `repo` (defaulting to the repository of the
-invocation directory), and an optional `parent` (defaulting to the
-repository root's sibling directory, so worktrees never live inside a
-checkout of the repository). It SHALL derive the worktree path as
+invocation directory), and an optional `parent` (defaulting to
+`<repository root>/.ptah/worktree`, so worktrees live under the
+repository's own ptah directory by default — one conventional home for
+everything ptah-owned — rather than scattered as siblings of the
+repository root). It SHALL derive the worktree path as
 `<parent>/<repo-basename>-<name>` and return a record carrying the path
-(always absolute), the branch, and the ref. When `fetch` is set, provision
+(always absolute), the branch, and the ref. When the parent directory
+does not exist, provision SHALL create it (including intermediate
+directories) before resolving the worktree. When `fetch` is set, provision
 SHALL fetch the ref's remote (a plain fetch, no refspec) before
 resolution.
+
+Because the default parent sits inside the repository's checkout, a
+git-ignored `<repo-root>/.ptah/worktree/` is a declared environment
+requirement, like `git` on PATH: without it, every worktree is untracked
+noise in `git status`. A worktree inside the checkout SHALL be treated as
+an accepted, documented trade-off: `git clean -fdx` in the shared
+checkout removes nested worktree directories (branches survive in the
+shared object store; uncommitted state does not), and a consumer who
+cannot accept that passes `parent` explicitly to place worktrees outside
+the checkout.
 
 Provision SHALL resolve in this order, and SHALL never reset an adopted
 worktree or branch — a crashed run's unpushed commits are never silently
@@ -323,10 +337,25 @@ converged loop is something the caller logs, not a failed run.
 - **WHEN** the local branch exists (a previous teardown kept it) and `ref` is that branch
 - **THEN** the worktree is attached to the existing branch as-is, preserving its commits
 
-#### Scenario: Path derivation stays outside the repository
+#### Scenario: Default parent lives under the repository's ptah directory
 
 - **WHEN** `parent` is omitted
-- **THEN** the worktree path is `<sibling-of-the-repo-root>/<repo-basename>-<name>`, absolute, never inside a checkout of the repository
+- **THEN** the worktree path is `<repo-root>/.ptah/worktree/<repo-basename>-<name>`, absolute, under the repository's own `.ptah` directory
+
+#### Scenario: Path derivation stays outside the repository
+
+- **WHEN** `parent` is passed explicitly as a directory outside any checkout
+- **THEN** the worktree path is `<parent>/<repo-basename>-<name>`, absolute, and the worktree lives outside every checkout of the repository — the opt-out for consumers who cannot accept the nested-worktree trade-off
+
+#### Scenario: Missing parent directory is created
+
+- **WHEN** provision runs with the derived parent directory absent (the default `.ptah/worktree` on a first run, or an explicit `parent` pointing at a fresh path)
+- **THEN** the parent directory is created with its intermediate directories before the worktree is added, and provision succeeds
+
+#### Scenario: Worktree inside the checkout requires the ignore rule
+
+- **WHEN** a consumer relies on the default parent without git-ignoring `<repo-root>/.ptah/worktree/`
+- **THEN** that is a declared environment requirement violation, like missing `git` on PATH: the mechanism proceeds, and the worktree surfaces as untracked noise in `git status` of the shared checkout
 
 #### Scenario: Provision failure raises with stderr
 

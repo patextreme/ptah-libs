@@ -75,9 +75,12 @@ discoverable inside the repo.
 
 ### D2 — Provision creates the missing parent
 
-`git worktree add` does not reliably create nested missing parents, and
-the default path adds two levels (`.ptah/worktree`) that do not exist on
-a first run. Provision execs `mkdir -p` on the resolved parent after path
+Git's own parent creation for `worktree add` is version-dependent and
+declared nowhere here — current git (2.54) happens to create nested
+missing parents, but the spec's "provision SHALL create it" must hold by
+the library's own act, not by leaning on whatever the local git does —
+and the default path adds two levels (`.ptah/worktree`) that do not
+exist on a first run. Provision execs `mkdir -p` on the resolved parent after path
 derivation, before the registration checks — a fresh path is the only
 case that reaches creation, since an adopted worktree returns first and
 an unregistered directory at the path raises. Explicit `parent` values
@@ -132,9 +135,11 @@ prevent. Documented in the README; no code.
 
 ## Migration Plan
 
-1. Land the code, spec, docs, and `.gitignore` change together; tag as a
-   new minor/major per the project's pinning convention (the default is
-   BREAKING for consumers who relied on sibling placement).
+1. Land the code, spec, docs, and `.gitignore` change together; cut a
+   **minor** tag — the repo is pre-1.0 (`0.1.0`) and consumers pin tags,
+   so a breaking default is opt-in by re-pinning and the bump is the
+   announcement, not a guard (the default is BREAKING for consumers who
+   relied on sibling placement).
 2. Consumers with in-flight runs: let them finish or accept the re-home —
    the next provision attaches the surviving branch at the new location
    (D4).

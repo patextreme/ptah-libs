@@ -233,14 +233,20 @@ list — so a human can correlate the ask with the session.
 `ptah.exec`: a shim points a playbook at a checkout no other run shares,
 without managing git state by hand. It takes no agent handle and no
 configuration table, and `git` on PATH is a declared environment
-requirement — exactly as `gh` is for the PR transport.
+requirement — exactly as `gh` is for the PR transport — and so is a
+git-ignored `<repo-root>/.ptah/worktree/`: worktrees default under the
+repository's own `.ptah` directory, where the rule keeps them out of
+`git status`. A worktree inside the checkout is an accepted trade-off
+(`git clean -fdx` deletes nested worktrees; branches survive, uncommitted
+state does not) — pass `parent` explicitly to place worktrees outside
+every checkout.
 
 ```lua
 local libs = require("./luau_packages/ptah_libs")
 
--- One worktree per run, beside the repository (never inside it).
+-- One worktree per run, under the repository's own `.ptah/worktree/`.
 local wt = libs.std.worktree.provision({
-	name = "pr-42",             -- path: <sibling of the repo root>/<repo>-pr-42
+	name = "pr-42",             -- path: <repo root>/.ptah/worktree/<repo>-pr-42
 	ref = "origin/fix/login",   -- required; never the shared tree's HEAD
 	-- branch defaults to the ref's short name (`fix/login`)
 	fetch = true,              -- fetch the ref's remote before resolving

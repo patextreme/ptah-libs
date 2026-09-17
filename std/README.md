@@ -13,5 +13,15 @@ repo. See `../README.md` for the library contract and consumption model.
   facility (outcomes as data; no ask ever raises)
 - `worktree.luau` — git worktree lifecycle over `ptah.exec`: `provision`
   (adopt as-is / fast-forward-or-fail / create; never reset) and
-  `teardown` (refuse-dirty, never branches); `git` on PATH is a declared
-  environment requirement
+  `teardown` (refuse-dirty, never branches). Worktrees default under
+  `<repo-root>/.ptah/worktree/` (pass `parent` to place them elsewhere,
+  e.g. outside any checkout); `git` on PATH is a declared environment
+  requirement, and so is git-ignoring `.ptah/worktree/` — without the
+  rule every default worktree is untracked noise in `git status`, and
+  `git clean -fdx` in the shared checkout deletes the nested worktrees
+  (branches survive; uncommitted state does not).
+  Migrating from the old sibling default (`../<repo>-<name>`): the
+  next provision attaches the surviving branch at the new location;
+  retire each leftover sibling directory by hand with
+  `git worktree remove <old-path> && git worktree prune` (or plain
+  `rm -rf` + `prune`)

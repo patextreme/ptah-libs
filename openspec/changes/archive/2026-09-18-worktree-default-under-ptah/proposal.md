@@ -4,9 +4,9 @@
 
 ## What Changes
 
-- **BREAKING**: `provision`'s default `parent` becomes `<repository root>/.ptah/worktree` instead of the repository root's sibling; worktrees live inside the repository's `.ptah` directory by default. Consumers who pass `parent` explicitly are unaffected.
+- **BREAKING**: `provision`'s default `parent` becomes `<repository root>/.ptah/worktree` instead of the repository root's sibling; worktrees live inside the repository's `.ptah` directory by default. Consumers who pass `parent` explicitly are unaffected by the default change — one new behavior does reach them: provision creates a missing parent directory, so explicit-parent callers no longer pre-create it.
 - The path derivation stays `<parent>/<repo-basename>-<name>`; only the default parent changes.
-- `provision` creates the default parent directory if missing (git does not create nested parents for `worktree add`).
+- `provision` creates the default parent directory if missing (the library owns the creation rather than leaning on git's version-dependent native parent creation for `worktree add`).
 - The `.ptah/worktree/` ignore rule becomes a declared environment requirement, like `git` on PATH: a worktree inside the checkout is untracked noise in `git status` unless ignored. This repository's own `.gitignore` carries the rule as the reference consumer.
 - The factory workflow (`factory/main.luau`) inherits the new default; its path-derivation comments are updated. No behavioral change to its provision/teardown calls.
 - Migration is inherent in the existing resolution order: a rerun finds no registered worktree at the new path, finds the surviving `issue-<n>` branch, and attaches it at the new location. Old sibling directories are inert leftovers a human removes by hand.
@@ -27,5 +27,5 @@
 - `openspec/specs/playbooks/spec.md` — Worktree lifecycle requirement (via delta).
 - `.ptah/workflows/factory/main.luau` — comments describing the worktree path (behavior unchanged).
 - `.gitignore` — adds `.ptah/worktree/`.
-- `.work/worktree-verify.luau` — gains a case exercising the default parent (existing cases pass `parent` explicitly and are unaffected).
+- `.work/worktree-verify.luau` — created at implementation time as the uncommitted `.work/` scratch harness (it does not exist today): ports the prior worktree change's inline resolution/teardown cases (all passing `parent` explicitly, unaffected) and adds the default-parent case.
 - Consumers relying on the sibling default: worktrees move into the repo on the next provision; branches survive, sibling directories linger until hand-removed.

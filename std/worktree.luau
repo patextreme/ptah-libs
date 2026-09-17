@@ -9,6 +9,14 @@
 -- `teardown` refuses a dirty worktree by default and never touches
 -- branches (unpushed commits survive on the local branch).
 --
+-- Worktrees default under the repository's own `.ptah/worktree/` — one
+-- conventional home for everything ptah-owned in a consumer repo. A
+-- worktree inside the checkout is an accepted, documented trade-off:
+-- `git clean -fdx` in the shared checkout deletes nested worktree
+-- directories (branches survive in the shared object store; uncommitted
+-- state does not), and a consumer who cannot accept that passes
+-- `parent` explicitly to place worktrees outside every checkout.
+--
 -- Failure is asymmetric on purpose: `provision` raises carrying git's
 -- stderr (a failed provision means the run cannot proceed, pcall-able);
 -- `teardown` returns its outcome as data — a dirty refusal is the
@@ -16,8 +24,10 @@
 -- loop, so the caller logs it rather than failing the run.
 --
 -- Environment: `git` on PATH (declared, not bundled), like the GitHub
--- transport's `gh`. The mechanism accepts no agent handles and no
--- configuration table.
+-- transport's `gh`, and a git-ignored `.ptah/worktree/` under the
+-- repository root — without the ignore rule every default worktree is
+-- untracked noise in the shared checkout's `git status`. The mechanism
+-- accepts no agent handles and no configuration table.
 
 export type ProvisionOptions = {
 	-- Identity of this worktree within its repository; the path is
@@ -37,9 +47,13 @@ export type ProvisionOptions = {
 	-- Repository to operate on. Defaults to the invocation directory's
 	-- repository (`git rev-parse --show-toplevel`).
 	repo: string?,
-	-- Directory that will hold the worktree. Defaults to the repository
-	-- root's sibling, so a worktree never lives inside a checkout of the
-	-- repository.
+	-- Directory that will hold the worktree. Defaults to
+	-- `<repository root>/.ptah/worktree`, so worktrees live under the
+	-- repository's own ptah directory; pass a directory outside any
+	-- checkout when `git clean -fdx` over nested worktrees is
+	-- unacceptable (branches survive a clean; uncommitted state does
+	-- not). A missing parent directory, intermediate directories
+	-- included, is created.
 	parent: string?,
 }
 
@@ -182,11 +196,22 @@ local function provision(options: ProvisionOptions): Worktree
 	local remote = remoteOf(remotes, options.ref)
 	local short = if remote ~= nil then string.sub(options.ref, #remote + 2) else options.ref
 	local branch = if options.branch ~= nil then options.branch else short
-	local parent = if options.parent ~= nil then options.parent else parentOf(root)
+	local parent = if options.parent ~= nil then options.parent else `{root}/.ptah/worktree`
 	local path = `{parent}/{basename(root)}-{options.name}`
 
 	if options.fetch == true and remote ~= nil then
 		git(root, { "fetch", remote })
+	end
+
+	-- The library owns parent creation: git's native creation of missing
+	-- parents for `worktree add` is version-dependent and declared
+	-- nowhere here, so the SHALL holds by this mkdir, not by whatever the
+	-- local git happens to do. Idempotent on an existing parent; a fresh
+	-- path is the only case that creates.
+	local made = ptah.exec("mkdir -p " .. quote(parent))
+	if made.exitCode ~= 0 then
+		local detail = if made.stderr ~= "" then made.stderr else made.stdout
+		error(`worktree: mkdir -p {parent} failed: {detail}`)
 	end
 
 	local registered = registeredWorktrees(root)
