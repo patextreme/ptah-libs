@@ -13,5 +13,7 @@ repo. See `../README.md` for the library contract and consumption model.
   facility (outcomes as data; no ask ever raises)
 - `worktree.luau` — git worktree lifecycle over `ptah.exec`: `provision`
   (adopt as-is / fast-forward-or-fail / create; never reset) and
-  `teardown` (refuse-dirty, never branches); `git` on PATH is a declared
-  environment requirement
+  `teardown` (refuse-dirty, never branches); an explicit relative
+  `parent` resolves from the selected repository root and provision
+  returns git's canonical physical absolute path; `git` on PATH is a
+  declared environment requirement
