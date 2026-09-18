@@ -248,11 +248,19 @@ whatever the shared checkout happens to sit on), an optional `branch`
 optional `fetch`, an optional `repo` (defaulting to the repository of the
 invocation directory), and an optional `parent` (defaulting to the
 repository root's sibling directory, so worktrees never live inside a
-checkout of the repository). It SHALL derive the worktree path as
-`<parent>/<repo-basename>-<name>` and return a record carrying the path
-(always absolute), the branch, and the ref. When `fetch` is set, provision
-SHALL fetch the ref's remote (a plain fetch, no refspec) before
-resolution.
+checkout of the repository). An explicit relative `parent` SHALL resolve
+against the selected repository root, not the invocation directory. It
+SHALL derive the worktree target as
+`<parent>/<repo-basename>-<name>`, resolve that target to the same
+canonical physical absolute path Git uses for registration, and return a
+record carrying that path, the branch, and the ref. The one canonical
+path SHALL be used for inventory lookup, existence checks, Git
+operations, diagnostics, and the returned record; after creation, Git's
+registered path SHALL be authoritative. Worktree inventory processing
+SHALL preserve every valid path exactly, including paths containing
+spaces, non-ASCII characters, quoting characters, and line delimiters.
+When `fetch` is set, provision SHALL fetch the ref's remote (a plain
+fetch, no refspec) before resolution.
 
 Provision SHALL resolve in this order, and SHALL never reset an adopted
 worktree or branch — a crashed run's unpushed commits are never silently
@@ -303,10 +311,35 @@ converged loop is something the caller logs, not a failed run.
 - **WHEN** provision runs and a registered worktree exists at the derived path on the requested branch
 - **THEN** the existing worktree is returned unchanged — no reset, no re-add — so an interrupted run resumes
 
+#### Scenario: Relative parent resolves from the repository root
+
+- **WHEN** provision receives a relative `parent`, including when invoked from a subdirectory of the selected repository
+- **THEN** it resolves the parent against the selected repository root and returns the canonical physical absolute worktree path
+
+#### Scenario: Relative-parent rerun adopts the original worktree
+
+- **WHEN** provision is called twice with the same relative `parent`, name, ref, and branch
+- **THEN** the second call identifies and adopts the worktree created by the first call without resetting it or changing its status
+
+#### Scenario: Symlinked parent uses Git's physical path
+
+- **WHEN** an explicit parent reaches an existing directory through a symbolic-link alias
+- **THEN** provision compares, operates on, logs, and returns the physical absolute path Git records, so a rerun through the alias adopts the same worktree
+
+#### Scenario: Unusual valid paths survive inventory parsing
+
+- **WHEN** a registered worktree path contains spaces, non-ASCII characters, quoting characters, or line delimiters
+- **THEN** provision preserves the path exactly and can identify and adopt that worktree
+
+#### Scenario: Dirty worktree is adopted unchanged
+
+- **WHEN** the registered worktree is on the requested branch and contains uncommitted or untracked changes
+- **THEN** provision adopts it without resetting, cleaning, stashing, switching, or otherwise changing its status
+
 #### Scenario: Branch mismatch at the path errors
 
-- **WHEN** the registered worktree at the path is on a different branch, or an unregistered directory sits at the path
-- **THEN** provision raises; adoption never silently switches or discards
+- **WHEN** the registered worktree at the path is on a different branch or detached, or an unregistered directory sits at the path
+- **THEN** provision raises and leaves the worktree or directory untouched; adoption never silently switches or discards
 
 #### Scenario: Existing branch fast-forwards against its remote counterpart
 
@@ -326,7 +359,7 @@ converged loop is something the caller logs, not a failed run.
 #### Scenario: Path derivation stays outside the repository
 
 - **WHEN** `parent` is omitted
-- **THEN** the worktree path is `<sibling-of-the-repo-root>/<repo-basename>-<name>`, absolute, never inside a checkout of the repository
+- **THEN** the worktree path is `<sibling-of-the-repo-root>/<repo-basename>-<name>`, canonical and absolute, never inside a checkout of the repository
 
 #### Scenario: Provision failure raises with stderr
 

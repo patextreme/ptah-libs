@@ -7,7 +7,11 @@
 -- existing worktree as-is, fast-forwards-or-fails an existing branch
 -- against its remote counterpart, and never resets or renames;
 -- `teardown` refuses a dirty worktree by default and never touches
--- branches (unpushed commits survive on the local branch).
+-- branches (unpushed commits survive on the local branch). One path
+-- identity rules a provision run: an explicit relative parent resolves
+-- from the selected repository root, the target collapses to its
+-- canonical physical absolute path before any lookup or mutation, and
+-- after creation git's registered path is authoritative.
 --
 -- Failure is asymmetric on purpose: `provision` raises carrying git's
 -- stderr (a failed provision means the run cannot proceed, pcall-able);
@@ -39,12 +43,15 @@ export type ProvisionOptions = {
 	repo: string?,
 	-- Directory that will hold the worktree. Defaults to the repository
 	-- root's sibling, so a worktree never lives inside a checkout of the
-	-- repository.
+	-- repository. A relative parent resolves against the selected
+	-- repository root — not the invocation directory — matching where
+	-- git itself puts the worktree for `git -C <root> worktree add`.
 	parent: string?,
 }
 
--- The provision record: the always-absolute worktree path, the branch
--- attached to it, and the ref it was resolved from.
+-- The provision record: the canonical physical absolute worktree path
+-- (after creation, git's exact registered path key), the branch attached
+-- to it, and the ref it was resolved from.
 export type Worktree = {
 	path: string,
 	branch: string,
@@ -75,8 +82,14 @@ local function quote(arg: string): string
 end
 
 -- Run git, returning the raw outcome (never raising). `repo` nil runs in
--- the invocation directory.
-local function execGit(repo: string?, args: { string }): { exitCode: number, stdout: string, stderr: string }
+-- the invocation directory. Default `stdout` is trimmed text, as callers
+-- have always seen; `opts.rawStdout` keeps git's stdout byte-exact for
+-- formats whose path bytes and record delimiters trimming would corrupt
+-- (the worktree inventory). `stderr` is always trimmed text.
+type GitOptions = {
+	rawStdout: boolean?,
+}
+local function execGit(repo: string?, args: { string }, opts: GitOptions?): { exitCode: number, stdout: string, stderr: string }
 	local command = "git"
 	if repo ~= nil then
 		command ..= " -C " .. quote(repo)
@@ -85,13 +98,14 @@ local function execGit(repo: string?, args: { string }): { exitCode: number, std
 		command ..= " " .. quote(arg)
 	end
 	local result = ptah.exec(command)
-	return { exitCode = result.exitCode, stdout = trim(result.stdout), stderr = trim(result.stderr) }
+	local stdout = if opts ~= nil and opts.rawStdout == true then result.stdout else trim(result.stdout)
+	return { exitCode = result.exitCode, stdout = stdout, stderr = trim(result.stderr) }
 end
 
 -- Run git, raising git's stderr on failure. A provision that cannot run
 -- its git command has nowhere to go, so this is the loud form.
-local function git(repo: string?, args: { string }): string
-	local result = execGit(repo, args)
+local function git(repo: string?, args: { string }, opts: GitOptions?): string
+	local result = execGit(repo, args, opts)
 	if result.exitCode ~= 0 then
 		local detail = if result.stderr ~= "" then result.stderr else result.stdout
 		error(`worktree: git {table.concat(args, " ")} failed: {detail}`)
@@ -137,18 +151,26 @@ local function remoteOf(remotes: { [string]: boolean }, ref: string): string?
 	return nil
 end
 
+-- Worktree inventory, parsed losslessly from NUL-delimited porcelain
+-- (`--porcelain -z`, raw stdout): fields are NUL-terminated and unusual
+-- paths are never quoted, so spaces, non-ASCII characters, quoting
+-- characters, newlines, and the record delimiters themselves survive
+-- exactly. A record starts at each `worktree <path>` field; a following
+-- `branch refs/heads/<name>` field names its branch; empty separators
+-- and unrelated fields are ignored; a record without a branch field is
+-- a detached worktree.
 local function registeredWorktrees(root: string): { paths: { [string]: boolean }, branches: { [string]: string } }
-	local output = git(root, { "worktree", "list", "--porcelain" })
+	local output = git(root, { "worktree", "list", "--porcelain", "-z" }, { rawStdout = true })
 	local paths: { [string]: boolean } = {}
 	local branches: { [string]: string } = {}
 	local current: string? = nil
-	for line in string.gmatch(output .. "\n", "([^\n]*)\n") do
-		local wt = string.match(line, "^worktree (.*)$")
+	for field in string.gmatch(output, "[^%z]+") do
+		local wt = string.match(field, "^worktree (.*)$")
 		if wt ~= nil then
 			current = wt
 			paths[wt] = true
 		else
-			local branch = string.match(line, "^branch refs/heads/(.*)$")
+			local branch = string.match(field, "^branch refs/heads/(.*)$")
 			if branch ~= nil and current ~= nil then
 				branches[current] = branch
 			end
@@ -163,6 +185,25 @@ end
 
 local function pathExists(path: string): boolean
 	return ptah.exec("test -e " .. quote(path)).exitCode == 0
+end
+
+-- Resolve `dir` to its physical absolute directory: symlink components
+-- collapse (`pwd -P`), relative input resolves from the caller's chosen
+-- coordinate system, and a missing directory returns nil for the caller
+-- to fail loudly on. POSIX shell built-ins only (`test`, `cd`, `pwd`);
+-- every dynamic value is single-quoted. Exactly pwd's one trailing
+-- newline is stripped — never `trim()`: a trailing whitespace byte can
+-- belong to the path itself (`ts ` is a legal POSIX directory name), and
+-- stripping it would re-key the whole provision onto a mangled location
+-- that the post-create readback cannot catch (git registers the path it
+-- was handed). Every other byte, including embedded and trailing
+-- whitespace inside the path, survives exactly, like the inventory.
+local function physicalDir(dir: string): string?
+	local result = ptah.exec(`if test -d {quote(dir)}; then cd {quote(dir)} && pwd -P; else exit 64; fi`)
+	if result.exitCode ~= 0 then
+		return nil
+	end
+	return (result.stdout:gsub("\n$", ""))
 end
 
 -- Provision a worktree, resolving in the order the spec fixes. Returns
@@ -182,8 +223,29 @@ local function provision(options: ProvisionOptions): Worktree
 	local remote = remoteOf(remotes, options.ref)
 	local short = if remote ~= nil then string.sub(options.ref, #remote + 2) else options.ref
 	local branch = if options.branch ~= nil then options.branch else short
-	local parent = if options.parent ~= nil then options.parent else parentOf(root)
-	local path = `{parent}/{basename(root)}-{options.name}`
+
+	-- One path identity for the whole operation. An explicit relative
+	-- parent resolves against the selected repository root — the same
+	-- place `git -C <root> worktree add` puts the target — and the parent
+	-- then collapses to its physical absolute directory, so symlink
+	-- aliases and the invocation directory cannot split inventory lookup,
+	-- existence checks, git arguments, diagnostics, and the returned
+	-- path onto different coordinate systems. A missing parent fails
+	-- loudly here; nothing creates it.
+	local explicitParent = options.parent
+	local parent: string
+	if explicitParent == nil then
+		parent = parentOf(root)
+	elseif string.match(explicitParent, "^/") == nil then
+		parent = `{root}/{explicitParent}`
+	else
+		parent = explicitParent
+	end
+	local physicalParent = physicalDir(parent)
+	if physicalParent == nil then
+		error(`worktree: parent directory {parent} does not exist or is not a directory`)
+	end
+	local path = `{physicalParent}/{basename(root)}-{options.name}`
 
 	if options.fetch == true and remote ~= nil then
 		git(root, { "fetch", remote })
@@ -215,6 +277,16 @@ local function provision(options: ProvisionOptions): Worktree
 		git(root, { "worktree", "add", path, branch })
 	else
 		git(root, { "worktree", "add", "-b", branch, path, options.ref })
+	end
+
+	-- Git is the final authority on identity: re-read the inventory,
+	-- require the canonical target to be registered on the requested
+	-- branch, and return that exact path key. An unexpected mismatch
+	-- leaves the (healthy) worktree in place for inspection — never an
+	-- automatic removal.
+	local readback = registeredWorktrees(root)
+	if not readback.paths[path] or readback.branches[path] ~= branch then
+		error(`worktree: {path} was created but is not registered on branch {branch}; leaving it in place for manual inspection`)
 	end
 
 	return { path = path, branch = branch, ref = options.ref }
