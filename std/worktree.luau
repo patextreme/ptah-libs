@@ -4,14 +4,29 @@
 -- runs in their own checkout without managing git state by hand.
 --
 -- Policy as parameters, with safe defaults: `provision` adopts an
--- existing worktree as-is, fast-forwards-or-fails an existing branch
--- against its remote counterpart, and never resets or renames;
+-- existing worktree as-is, prunes a stale registration (one whose
+-- directory a `git clean -ffdx` or a manual `rm` deleted) and
+-- re-creates the worktree — or raises when the registration survives
+-- the prune (a locked worktree; unlocking is never provision's act) —
+-- fast-forwards-or-fails an existing branch against its remote
+-- counterpart, and never resets or renames;
 -- `teardown` refuses a dirty worktree by default and never touches
 -- branches (unpushed commits survive on the local branch). One path
 -- identity rules a provision run: an explicit relative parent resolves
 -- from the selected repository root, the target collapses to its
 -- canonical physical absolute path before any lookup or mutation, and
 -- after creation git's registered path is authoritative.
+--
+-- Worktrees default under the repository's own `.ptah/worktree/` — one
+-- conventional home for everything ptah-owned in a consumer repo. A
+-- worktree inside the checkout is an accepted, documented trade-off:
+-- `git clean -ffdx` in the shared checkout deletes nested worktree
+-- directories (a plain `git clean -fdx` skips nested repositories;
+-- branches survive in the shared object store; uncommitted state does
+-- not; the next provision prunes the stale registration and re-creates
+-- the worktree — a locked registration raises instead), and a consumer
+-- who cannot accept that passes `parent` explicitly to place worktrees
+-- outside every checkout.
 --
 -- Failure is asymmetric on purpose: `provision` raises carrying git's
 -- stderr (a failed provision means the run cannot proceed, pcall-able);
@@ -20,8 +35,10 @@
 -- loop, so the caller logs it rather than failing the run.
 --
 -- Environment: `git` on PATH (declared, not bundled), like the GitHub
--- transport's `gh`. The mechanism accepts no agent handles and no
--- configuration table.
+-- transport's `gh`, and a git-ignored `.ptah/worktree/` under the
+-- repository root — without the ignore rule every default worktree is
+-- untracked noise in the shared checkout's `git status`. The mechanism
+-- accepts no agent handles and no configuration table.
 
 export type ProvisionOptions = {
 	-- Identity of this worktree within its repository; the path is
@@ -41,11 +58,16 @@ export type ProvisionOptions = {
 	-- Repository to operate on. Defaults to the invocation directory's
 	-- repository (`git rev-parse --show-toplevel`).
 	repo: string?,
-	-- Directory that will hold the worktree. Defaults to the repository
-	-- root's sibling, so a worktree never lives inside a checkout of the
-	-- repository. A relative parent resolves against the selected
-	-- repository root — not the invocation directory — matching where
-	-- git itself puts the worktree for `git -C <root> worktree add`.
+	-- Directory that will hold the worktree. Defaults to
+	-- `<repository root>/.ptah/worktree`, so worktrees live under the
+	-- repository's own ptah directory; pass a directory outside any
+	-- checkout when `git clean -ffdx` over nested worktrees is
+	-- unacceptable (branches survive a clean; uncommitted state does
+	-- not). A missing parent directory, intermediate directories
+	-- included, is created. A relative parent resolves against the
+	-- selected repository root — not the invocation directory —
+	-- matching where git itself puts the worktree for
+	-- `git -C <root> worktree add`.
 	parent: string?,
 }
 
@@ -230,16 +252,27 @@ local function provision(options: ProvisionOptions): Worktree
 	-- then collapses to its physical absolute directory, so symlink
 	-- aliases and the invocation directory cannot split inventory lookup,
 	-- existence checks, git arguments, diagnostics, and the returned
-	-- path onto different coordinate systems. A missing parent fails
-	-- loudly here; nothing creates it.
+	-- path onto different coordinate systems.
 	local explicitParent = options.parent
 	local parent: string
 	if explicitParent == nil then
-		parent = parentOf(root)
+		parent = `{root}/.ptah/worktree`
 	elseif string.match(explicitParent, "^/") == nil then
 		parent = `{root}/{explicitParent}`
 	else
 		parent = explicitParent
+	end
+
+	-- The library owns parent creation: git's native creation of missing
+	-- parents for `worktree add` is version-dependent and declared
+	-- nowhere here, so the SHALL holds by this mkdir, not by whatever the
+	-- local git happens to do. Idempotent on an existing parent; a fresh
+	-- path is the only case that creates. It precedes the physical
+	-- collapse because `pwd -P` needs the directory to exist.
+	local made = ptah.exec("mkdir -p " .. quote(parent))
+	if made.exitCode ~= 0 then
+		local detail = if made.stderr ~= "" then made.stderr else made.stdout
+		error(`worktree: mkdir -p {parent} failed: {detail}`)
 	end
 	local physicalParent = physicalDir(parent)
 	if physicalParent == nil then
@@ -252,6 +285,26 @@ local function provision(options: ProvisionOptions): Worktree
 	end
 
 	local registered = registeredWorktrees(root)
+	if registered.paths[path] and not pathExists(path) then
+		-- Stale registration: a `git clean -ffdx` or a manual `rm`
+		-- deleted the worktree directory while the registration
+		-- survived (git marks it prunable). Adopting as-is would hand
+		-- back a path that no longer exists and would never self-heal,
+		-- so prune the stale registration and fall through — the
+		-- branch survives the deletion, and the checks below re-create
+		-- the worktree at the same path.
+		git(root, { "worktree", "prune" })
+		registered = registeredWorktrees(root)
+		if registered.paths[path] then
+			-- The prune kept it: a locked stale registration (git skips
+			-- locked worktrees so one on an unmounted device or network
+			-- share keeps its admin files). Raising beats adopting a
+			-- nonexistent path, and unlocking is the registration
+			-- owner's decision, never provision's.
+			error(`worktree: {path} is registered but its directory is gone and the registration survived prune (a locked worktree?); unlock it or run git worktree prune by hand`)
+		end
+	end
+
 	if registered.paths[path] then
 		-- Adopt as-is: no reset, no re-add, so an interrupted run resumes.
 		local existing = registered.branches[path]
