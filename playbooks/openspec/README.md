@@ -3,7 +3,12 @@
 Groom, implement, and verify a named openspec change through a
 convergence loop: prompt an agent (running the openspec skills), judge
 the output with a typed predicate, fix and repeat until the predicate
-holds, a human is needed, or the iteration cap is reached.
+holds, an operator-owned decision needs a human, or the iteration cap
+is reached. Every work prompt carries a component-owned autonomy clause
+instructing the agent to make judgment calls autonomously, note each in
+its output as `judgment call: …`, and never wait for confirmation — the
+loop re-judges every pass, so a judgment call costs an iteration, never
+an interruption.
 
 ## Environment requirements (declared, not bundled)
 
@@ -85,8 +90,9 @@ Per-call data is a method argument:
   implemented. Each pass ends either complete or paused with a stated
   reason, as the skill defines those states: a pause the agent can
   resolve itself (e.g. updating the change's artifacts) is resolved and
-  the loop continues; a pause that needs human input escalates — an
-  answered ask resumes the loop, otherwise the operation fails (see
+  the loop continues; a pause that rests on an operator-owned decision
+  escalates — an answered ask resumes the loop, otherwise the operation
+  fails (see
   [Escalation](#escalation-ask-when-served-fail-otherwise)).
 - `ops:implement(change, scope)` — same loop with a task scope: free
   text describing the subset of the change's tasks the run is
@@ -108,7 +114,18 @@ Each operation returns the final accepted review text.
 
 ## Escalation (ask when served, fail otherwise)
 
-A judge-confirmed need for human input escalates through the stdlib's
+The bar is decision authority: an ask is justified only by an
+**operator-owned decision** — one the agent has no authority to take and
+the loop cannot reverse at bounded cost (product direction, architecture,
+and scope are examples in the prompt copy, not gates). A judge-rejected
+pass probes the work session: the probe instructs self-resolution and
+names the exception, and a typed predicate judges the probe's claim. A
+confirmation, an approval to proceed, or a recoverable choice (a
+decision whose wrong outcome the judge's next rejection repairs) never
+escalates: the claim fails the predicate and the loop issues the fix
+prompt.
+
+A judge-confirmed operator-owned decision escalates through the stdlib's
 `escalate` transport: the loop pauses on an ask — the work session
 stays open — whose prompt line identifies the operation, the change,
 and the iteration state (`opsx-groom add-auth: human input

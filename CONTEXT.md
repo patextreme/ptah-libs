@@ -33,12 +33,28 @@ refused escalation ends it.
 _Avoid_: review loop, retry loop (those name specific uses of the pattern)
 
 **Escalation**:
-The routing decision a convergence loop makes when a judged pass cannot
-proceed without a human. Two realizations: an ask — pause, surface the
-blocker, resume with the human's answer — when a human channel serves
-it; a hard fail otherwise.
+The routing decision a convergence loop makes when a judged pass hits an
+operator-owned decision: an ask — pause, surface the blocker, resume
+with the human's answer — when a human channel serves it; a hard fail
+otherwise. A recoverable choice never escalates. The pr review loop
+never escalates — the PR itself is its human checkpoint.
 _Avoid_: abort (that names the human refusing an ask, not the routing),
 fallback (escalation is a routing decision, not a degradation)
+
+**Operator-owned decision**:
+A decision the agent has no authority to take on the operator's behalf
+— product direction, architecture, scope — and whose wrong outcome the
+loop cannot reverse at bounded cost. The only justification for an ask.
+_Avoid_: critical aspect (critical is a verification severity, not an
+authority), human input (too broad: a confirmation is human input but
+not an operator-owned decision)
+
+**Recoverable choice**:
+A decision whose wrong outcome the loop's own machinery repairs at
+bounded cost — the judge rejects it, one iteration is spent. Never
+justifies an ask: the agent takes it and the pass is re-judged.
+_Avoid_: mechanical decision (uncheckable), confirmation (a confirmation
+is a recoverable choice, not a separate category)
 
 **Shim**:
 The thin consumer-owned entry script that requires the package and hands it

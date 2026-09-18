@@ -180,27 +180,30 @@ loops share these conventions, documented here so drift stays visible:
 - Sessions: per-iteration work sessions are `<prefix>:<n>` and judge
   sessions `<prefix>-judge:<n>`; a loop that probes for human input
   before asking (openspec) uses escalation-judge sessions
-  `<prefix>-escalate-judge:<n>`, while the `pr` playbook's judge is itself the
-  escalation trigger and creates no probe session.
+  `<prefix>-escalate-judge:<n>`, while the `pr` playbook creates no
+  probe session and raises no ask at all — its `needsHuman` flag is
+  report-only.
 - Every prompt of a loop is prefixed `[<prefix> iteration N of M]` so
   the agent (and the logs) can see the loop state.
 - Escalation is two-mode: **ask when a provider serves the request,
-  hard fail when none does.** A confirmed need for human input routes
-  through `std/escalate` — the work session stays open across the
-  ask, and a human answer is sent back into it verbatim (no header,
-  no framing: the human is driving the agent), the iteration counting
-  against the cap like any other. The ask's prompt line identifies
-  the operation, the per-call identity, and the iteration state
-  (`<prefix> <change or PR URL>: human input required (iteration N of
-  M)`); its details carry the work session's label and the **full**
-  trigger payload, untruncated — the probe text for a probing loop, the
-  full review prose for the `pr` playbook's judge-flagged escalation —
-  so the human must be able to answer.
+  hard fail when none does.** An ask is justified only by an
+  operator-owned decision — one the agent has no authority to take and
+  the loop cannot reverse at bounded cost; a confirmation or a
+  recoverable choice never asks (the pr review loop never asks at all:
+  the PR at merge time is its human checkpoint). A confirmed
+  operator-owned decision routes through `std/escalate` — the work
+  session stays open across the ask, and a human answer is sent back
+  into it verbatim (no header, no framing: the human is driving the
+  agent), the iteration counting against the cap like any other. The
+  ask's prompt line identifies the operation, the per-call identity,
+  and the iteration state (`<prefix> <change or PR URL>: human input
+  required (iteration N of M)`); its details carry the work session's
+  label and the **full** probe text, untruncated — so the human must be
+  able to answer.
 - Failure wording: the human refused the ask — `<prefix>: human
   aborted escalation (iteration N of M)`; no provider served the ask —
-  each playbook's pre-ask wording, byte-identical (e.g. `pr-review:
-  human input is required to resolve the findings (iteration N of
-  M)`), so provider-less consumers see zero drift; the cap —
+  each playbook's pre-ask wording, byte-identical, so provider-less
+  consumers see zero drift; the cap —
   `<prefix>: did not converge within M iterations` (the `pr` playbook
   instead returns a non-converged typed outcome at its cap, since
   outcomes-as-data is its contract).

@@ -12,32 +12,26 @@
 -- requirements.
 --
 -- Loop shape (this playbook's own policy over std/predicate's typed-result
--- pattern and std/escalate):
+-- pattern):
 --   * discovery pass (full-PR review) when no ledger exists, then delta
 --     reviews against the ledger's `lastReviewedSha`;
---   * a typed judge converts the prose into findings, reconciles the open
---     ledger findings, and flags `needsHuman`;
+--   * a typed judge converts the prose into findings and reconciles the
+--     open ledger findings, flagging `needsHuman`;
 --   * convergence is `no open blocking findings` — deferred findings never
 --     gate;
 --   * a fix turn batches all open blocking findings by root cause, then
---     commit-and-push (gated by dry-run);
+--     commit-and-push (gated by dry-run); an open blocking finding carrying
+--     `needsHuman` is fixed autonomously like any other — the loop never
+--     asks a human (the PR itself, reviewed at merge time, is its human
+--     checkpoint; the flag is report-only);
 --   * a fix is issued only when budget remains, so every push is followed
 --     by at least one review pass;
---   * escalation is gated to the convergence predicate: only an open
---     blocking finding carrying the judge's `needsHuman` determination
---     (raised as a new finding or through a reconciliation record joined
---     against the ledger) routes through std/escalate — a served answer is
---     adjudicated into typed ledger mutations before any fix turn; a fix
---     answer resumes the still-open work session, a decision-only answer
---     issues no prompt and no push and converges immediately when no open
---     blocking findings remain, abort/unavailable fail;
 --   * every returned terminal outcome posts a PR review report: a reporter
 --     agent authors the body, and the playbook prepends a deterministic
 --     status line and posts the marked comment.
 
 local gh = require("../../std/gh")
 local sessionConfig = require("../../std/session-config")
-local escalate = require("../../std/escalate")
 local defaultInstruction = require("./default-instruction")
 local protocol = require("./protocol")
 
@@ -57,44 +51,20 @@ export type LedgerFinding = {
 	status: FindingStatus,
 	-- The judge's latest determination that resolving this finding needs a
 	-- human: recorded when the finding is filed, updated when a later
-	-- reconciliation revisits it, cleared when an adjudicated decision
-	-- records a mutation for it (the human's determination supersedes the
-	-- judge's). Only an open blocking finding carrying it triggers an ask.
+	-- reconciliation revisits it, never cleared — there is no mid-loop
+	-- human decision to supersede it. Report-only: it never gates, pauses,
+	-- or fails the loop; it renders on open findings' lines for the human
+	-- reviewing the PR.
 	needsHuman: boolean,
 	-- The commit that carried the fix, once a fix turn has pushed one.
 	fixCommit: string?,
 }
 
--- One adjudication mutation: the human's typed decision for one finding,
--- as applied to the ledger and recorded in the decisions record. `defer`
--- transitions open → deferred and `accept` open → accepted (each recording
--- the decision note); `fix` leaves the finding open, the answer directing
--- its fix.
-export type LedgerMutation = {
-	id: string,
-	action: "defer" | "accept" | "fix",
-	note: string?,
-}
-
--- One answered ask, in ask order: the ask's prompt line, the human's
--- verbatim answer, and the applied per-finding mutations with their notes.
-export type LedgerDecision = {
-	prompt: string,
-	answer: string,
-	mutations: { LedgerMutation },
-}
-
--- The adjudication session's typed result: per-finding mutations derived
--- from the verbatim answer and the ledger.
-export type Adjudication = {
-	mutations: { LedgerMutation },
-}
-
 -- The playbook-owned ledger: PR identity, the discovery and last-reviewed
 -- SHAs, the PR's intention, the findings (resolved findings retained with
--- status `fixed`), the family table, the count of findings resolved once
--- verified clean, and the decisions record (one entry per answered ask, in
--- ask order).
+-- status `fixed`), the family table, and the count of findings resolved
+-- once verified clean. A legacy `decisions` record (the retired ask path's
+-- writer) is dropped on read and never written.
 export type Ledger = {
 	pr: string,
 	discoverySha: string,
@@ -103,7 +73,6 @@ export type Ledger = {
 	findings: { LedgerFinding },
 	families: { string },
 	resolvedCount: number,
-	decisions: { LedgerDecision },
 }
 
 -- One judge finding: the judge's typed read of the review prose.
@@ -114,8 +83,9 @@ export type JudgeFinding = {
 	-- The judge's determination that resolving this finding needs a human.
 	needsHuman: boolean,
 	-- `deferred` marks an important finding outside the PR's intention: it
-	-- never gates convergence.
-	status: "open" | "deferred" | "accepted",
+	-- never gates convergence. (`accepted` is a legacy status no judge
+	-- writes: its only writer was the retired adjudication path.)
+	status: "open" | "deferred",
 	-- A short description of the issue (one line).
 	title: string,
 }
@@ -209,7 +179,6 @@ export type Instance = {
 
 local DEFAULT_MAX_ITERATIONS = 8
 local DEFAULT_JUDGE_ATTEMPTS = 3
-local DEFAULT_ADJUDICATION_ATTEMPTS = 3
 local DEFAULT_REPORTER_ATTEMPTS = 3
 local LEDGER_MARKER = "<!-- ptah:pr-review-ledger -->"
 local REPORT_MARKER = "<!-- ptah:pr-review-report -->"
@@ -233,7 +202,7 @@ local FINDINGS_SCHEMA: { [string]: any } = {
 					family = { type = "string" },
 					validation = { type = "string", enum = { "validated", "refuted", "unvalidated" } },
 					needsHuman = { type = "boolean" },
-					status = { type = "string", enum = { "open", "deferred", "accepted" } },
+					status = { type = "string", enum = { "open", "deferred" } },
 					title = { type = "string" },
 				},
 				required = { "severity", "family", "validation", "needsHuman", "status", "title" },
@@ -255,31 +224,6 @@ local FINDINGS_SCHEMA: { [string]: any } = {
 		},
 	},
 	required = { "findings", "priorFindingsStatus" },
-}
-
--- The adjudication session's result contract: per-finding mutations derived
--- from the human's verbatim answer. `defer` (open → deferred) and `accept`
--- (open → accepted) carry an optional note; `fix` leaves the finding open,
--- the answer directing its fix.
-local ADJUDICATION_SCHEMA: { [string]: any } = {
-	type = "object",
-	additionalProperties = false,
-	properties = {
-		mutations = {
-			type = "array",
-			items = {
-				type = "object",
-				additionalProperties = false,
-				properties = {
-					id = { type = "string" },
-					action = { type = "string", enum = { "defer", "accept", "fix" } },
-					note = { type = "string" },
-				},
-				required = { "id", "action" },
-			},
-		},
-	},
-	required = { "mutations" },
 }
 
 -- The reporter session's result contract: the single report-body field.
@@ -320,11 +264,13 @@ local function parseLedgerBody(body: string): Ledger?
 	if type(value) ~= "table" or type(value.findings) ~= "table" then
 		return nil
 	end
-	-- Legacy ledgers predate `needsHuman` and `decisions`: read tolerantly (a
-	-- finding without the field is treated as not needing a human, no
-	-- decisions are assumed); both are written on the next persist.
+	-- Legacy ledgers predate `needsHuman`, and ledgers from the retired ask
+	-- path carry a decisions record: read tolerantly (a finding without the
+	-- flag is treated as not needing a human; `accepted` findings stay
+	-- terminal) and drop the decisions record, so no persist ever re-writes
+	-- it. The flag is written on the next persist.
+	value.decisions = nil
 	local ledger = value :: Ledger
-	ledger.decisions = ledger.decisions or {}
 	for _, finding in ledger.findings do
 		if type(finding) == "table" then
 			finding.needsHuman = finding.needsHuman == true
@@ -634,9 +580,8 @@ local function findingList(ledger: Ledger, status: FindingStatus, severity: Seve
 	return lines
 end
 
--- The ledger finding an id names, or nil when the id matches no entry — the
--- join behind both the gated escalation trigger and the inert handling of
--- unknown ids.
+-- The ledger finding an id names, or nil when the id matches no entry —
+-- the join behind reconciliation's inert handling of unknown ids.
 local function ledgerFindingById(ledger: Ledger, id: string): LedgerFinding?
 	for _, finding in ledger.findings do
 		if finding.id == id then
@@ -654,9 +599,10 @@ end
 -- reconciliation is a no-op confirmation: the entry stays, no duplicate is
 -- filed. Every reconciliation record that revisits an open or deferred
 -- finding updates its `needsHuman` flag — the judge's latest determination
--- wins. The judge's new findings are appended with fresh ids; the filed
--- findings are returned in filing order (the gated escalation trigger
--- filters them).
+-- wins (the flag never clears; there is no mid-loop human decision to
+-- supersede it). The judge's new findings are appended with fresh ids; the
+-- filed findings are returned in filing order (open blocking ones drive the
+-- fix turn — `needsHuman` never gates).
 local function applyFindings(ledger: Ledger, findings: Findings): { LedgerFinding }
 	for _, rec in findings.priorFindingsStatus do
 		local finding = ledgerFindingById(ledger, rec.id)
@@ -693,48 +639,6 @@ local function applyFindings(ledger: Ledger, findings: Findings): { LedgerFindin
 		end
 	end
 	return filed
-end
-
--- Apply adjudication mutations to the ledger: `defer` transitions open →
--- deferred and `accept` open → accepted (the decision note is retained in
--- the recorded decision), `fix` leaves the finding open for the
--- answer-directed fix turn. The contract is one decision per finding: when
--- the adjudicator names an id more than once, only its last mutation
--- applies — an earlier `fix` can never be followed by a same-batch terminal
--- transition of the same finding, so a pushed fix turn always has its
--- finding still open and is always followed by a review pass. Mutations
--- target existing open findings only — an unknown or already-terminal id is
--- a no-op, and adjudication never creates findings. A decided finding's
--- `needsHuman` flag clears: the human's determination supersedes the
--- judge's. Returns the applied mutations (the recorded decision carries
--- these, notes included).
-local function applyMutations(ledger: Ledger, mutations: { LedgerMutation }): { LedgerMutation }
-	-- Collapse to one mutation per id: last wins, first-seen order kept.
-	local effective: { [string]: LedgerMutation } = {}
-	local order: { string } = {}
-	for _, mutation in mutations do
-		if effective[mutation.id] == nil then
-			table.insert(order, mutation.id)
-		end
-		effective[mutation.id] = mutation
-	end
-
-	local applied: { LedgerMutation } = {}
-	for _, id in order do
-		local mutation = effective[id]
-		local finding = ledgerFindingById(ledger, id)
-		if finding == nil or finding.status ~= "open" then
-			continue
-		end
-		if mutation.action == "defer" then
-			finding.status = "deferred"
-		elseif mutation.action == "accept" then
-			finding.status = "accepted"
-		end
-		finding.needsHuman = false
-		table.insert(applied, mutation)
-	end
-	return applied
 end
 
 -- ---------------------------------------------------------------------------
@@ -782,7 +686,7 @@ local function buildJudgePrompt(
 		"- Report a recurrence of a ledger finding against that finding's id, not as a new finding.",
 		"- A recurrence of a deferred ledger finding is still deferred: report it against that finding's id with status \"deferred\", never as a new finding.",
 		"- For every open or deferred ledger finding, report in priorFindingsStatus whether it is resolved (with evidence), still open, or still deferred.",
-		"- Set needsHuman true only on an open blocking finding whose resolution requires a human decision. Never set needsHuman on a deferred or non-blocking finding: a human-worthy non-blocking concern belongs in the review prose.",
+		"- Set needsHuman true only on an open blocking finding that rests on an operator-owned decision — one the agent has no authority to take — that a human should examine at review. Never set needsHuman on a deferred or non-blocking finding: a human-worthy non-blocking concern belongs in the review prose.",
 		"",
 		"## Review prose",
 		reviewText,
@@ -804,9 +708,9 @@ local function buildFixPrompt(prUrl: string, ledger: Ledger, header: string): st
 end
 
 -- Render one ledger finding as a one-line entry (the fixing commit, when
--- present, travels with it; a persisted `needsHuman` flag is shown on open —
--- undecided — findings' lines, where it renders without ever asking on its
--- own).
+-- present, travels with it; a persisted `needsHuman` flag renders on open
+-- findings' lines — a pointer for the human reviewing the PR, never a
+-- gate).
 local function renderFinding(finding: LedgerFinding): string
 	local flag = if finding.needsHuman and finding.status == "open" then ", needs human" else ""
 	local fix = if finding.fixCommit ~= nil and finding.fixCommit ~= "" then `, fix {finding.fixCommit}` else ""
@@ -865,21 +769,6 @@ local function renderLedger(ledger: Ledger, iterations: number, cap: number): st
 	group("Accepted", function(f: LedgerFinding): boolean
 		return f.status == "accepted"
 	end)
-	-- The decisions record: the human's answers, verbatim, beside the
-	-- mutations they produced — the truthful counterpart to a decided
-	-- finding's terminal status.
-	if #ledger.decisions > 0 then
-		table.insert(lines, "")
-		table.insert(lines, "### Decisions")
-		for i, decision in ledger.decisions do
-			table.insert(lines, `- ask {i}: {decision.prompt}`)
-			table.insert(lines, `  - answer: {decision.answer}`)
-			for _, mutation in decision.mutations do
-				local note = if mutation.note ~= nil and mutation.note ~= "" then ` — {mutation.note}` else ""
-				table.insert(lines, `  - {mutation.action} {mutation.id}{note}`)
-			end
-		end
-	end
 	return table.concat(lines, "\n")
 end
 
@@ -902,11 +791,11 @@ local function sectionContract(status: "converged" | "non-converged"): string
 	table.insert(lines, "- Open non-blocking: one line per open non-blocking finding, with its ledger id and title.")
 	table.insert(
 		lines,
-		"- Deferred: one line per deferred finding, noting it is important but outside the PR's intention. A deferred finding named by a recorded decision is a maintainer decision — annotate it as decided by the maintainer (the Decisions section names them)."
+		"- Deferred: one line per deferred finding, noting it is important but outside the PR's intention."
 	)
 	table.insert(
 		lines,
-		"- Accepted: one line per accepted finding; accepted findings are maintainer decisions — annotate them as such."
+		"- Accepted: one line per accepted finding; accepted findings are legacy entries (a retired mid-loop ask produced them) — annotate them as maintainer decisions."
 	)
 	table.insert(
 		lines,
@@ -955,103 +844,6 @@ local function statusLine(status: "converged" | "non-converged", ledger: Ledger)
 	local open = openBlockingCount(ledger)
 	local noun = if open == 1 then "finding" else "findings"
 	return `**PR review report — {status}** ({open} open blocking {noun})`
-end
-
--- The escalation trigger: the findings the ask must name, gated to the
--- convergence predicate. A judge finding triggers only when it is open +
--- blocking and carries `needsHuman`; a reconciliation record triggers only
--- when the ledger finding it names by id is itself open + blocking (an id
--- absent from the ledger never escalates — escalation is the loop's most
--- expensive action, so an unverifiable reference errs toward not
--- interrupting a human). The `needsHuman` flag on a non-blocking or deferred
--- finding never asks: it persists in the ledger and renders in the report.
-local function triggeringFindings(ledger: Ledger, findings: Findings, filed: { LedgerFinding }): { LedgerFinding }
-	local triggered: { LedgerFinding } = {}
-	local seen: { [string]: boolean } = {}
-	for _, finding in filed do
-		if finding.status == "open" and finding.severity == "blocking" and finding.needsHuman then
-			seen[finding.id] = true
-			table.insert(triggered, finding)
-		end
-	end
-	for _, rec in findings.priorFindingsStatus do
-		if rec.needsHuman ~= true then
-			continue
-		end
-		local finding = ledgerFindingById(ledger, rec.id)
-		if finding ~= nil and finding.status == "open" and finding.severity == "blocking" and not seen[finding.id] then
-			seen[finding.id] = true
-			table.insert(triggered, finding)
-		end
-	end
-	return triggered
-end
-
--- One line naming a finding for the ask's prompt line and the adjudication
--- prompt: id, family, severity, title.
-local function describeFinding(finding: LedgerFinding): string
-	return `{finding.id} ({finding.severity}, family {finding.family}): {finding.title}`
-end
-
--- ---------------------------------------------------------------------------
--- Adjudication session (typed resultSchema, bounded retry): the judge agent
--- under the dedicated mutation contract, converting a human's verbatim
--- answer into per-finding ledger mutations before any fix turn.
--- ---------------------------------------------------------------------------
-
-local function runAdjudication(
-	judgeAgent: Agent,
-	sessionId: string,
-	judgeSessionConfig: { sessionConfig.Entry }?,
-	cwd: string?,
-	prompt: string
-): { LedgerMutation }
-	for attempt = 1, DEFAULT_ADJUDICATION_ATTEMPTS do
-		local session: Session = judgeAgent:session({ id = sessionId, cwd = cwd, resultSchema = ADJUDICATION_SCHEMA })
-		sessionConfig.apply(session, judgeSessionConfig)
-		local result = session:prompt(prompt)
-		local typed = result.result :: Adjudication?
-		session:close()
-		if typed ~= nil then
-			return typed.mutations
-		end
-		ptah.log(
-			`pr-review adjudicator {sessionId} submitted no typed mutations (attempt {attempt}/{DEFAULT_ADJUDICATION_ATTEMPTS})`
-		)
-	end
-	error(`pr-review adjudication {sessionId} never submitted typed mutations after {DEFAULT_ADJUDICATION_ATTEMPTS} attempts`)
-end
-
--- The adjudication prompt: the triggering findings the ask named, the ledger
--- state, and the human's verbatim answer, under the mutation contract.
-local function buildAdjudicationPrompt(
-	prUrl: string,
-	answer: string,
-	triggered: { LedgerFinding },
-	ledger: Ledger
-): string
-	local named: { string } = {}
-	for _, finding in triggered do
-		table.insert(named, `- {describeFinding(finding)}`)
-	end
-	return table.concat({
-		`Adjudicate the human's answer to this loop's escalation ask for {prUrl}.`,
-		"",
-		"## Triggering findings (what the ask named)",
-		table.concat(named, "\n"),
-		"",
-		"## Ledger",
-		ledgerSummary(ledger),
-		"",
-		"## The human's answer (verbatim)",
-		answer,
-		"",
-		"## Rules",
-		"- Return one mutation per finding the answer decides: its ledger `id`, the `action` (`defer`, `accept`, or `fix`), and an optional `note` carrying the human's reason.",
-		"- `defer` parks the finding outside this PR's intention (open → deferred); `accept` accepts it as-is (open → accepted); `fix` leaves it open — the answer's text directs the fix turn.",
-		"- Only findings that are currently open may be mutated: never include an id that is unknown, already fixed, already deferred, or already accepted.",
-		"- Never invent ids or new findings; when the answer decides nothing, return an empty mutations array.",
-	}, "\n")
 end
 
 -- ---------------------------------------------------------------------------
@@ -1144,7 +936,6 @@ function M.new(config: Config): Instance
 					findings = {},
 					families = {},
 					resolvedCount = 0,
-					decisions = {},
 				}
 			end
 
@@ -1257,7 +1048,7 @@ function M.new(config: Config): Instance
 					config.workingDir,
 					buildJudgePrompt(prUrl, verdict, ledger, ledger.intention, config.blockingAdditions)
 				)
-				local filed = applyFindings(ledger, findings)
+				applyFindings(ledger, findings)
 				ledger.lastReviewedSha = reviewedSha
 				persist()
 
@@ -1272,108 +1063,18 @@ function M.new(config: Config): Instance
 					return finish("non-converged", verdict, verdict, iteration + 1)
 				end
 
-				local triggered = triggeringFindings(ledger, findings, filed)
-				if #triggered > 0 then
-					-- The ask's prompt line identifies the loop, the PR URL, and
-					-- the iteration state, and names every triggering finding;
-					-- the details open with the answer grammar the adjudicator
-					-- understands, then carry the work session's label, the
-					-- agent-side ACP session id, and the full review prose,
-					-- untruncated.
-					local named: { string } = {}
-					for _, finding in triggered do
-						table.insert(named, describeFinding(finding))
-					end
-					local promptLine = `pr-review {prUrl}: human input required (iteration {iteration + 1} of {maxIterations}) — decision needed on: {table.concat(named, "; ")}`
-					local answer = escalate.ask({
-						prompt = promptLine,
-						details = table.concat({
-							"Answer grammar — one line per finding:",
-							"  defer <id> — park the finding outside this PR's intention",
-							"  accept <id> — accept the finding as-is",
-							"  fix: <instructions> — direct the fix (the text is sent to the work session verbatim)",
-							"",
-							`work session: {session:label()}`,
-							`agent session: {session:sessionId()}`,
-							"",
-							verdict,
-						}, "\n"),
-					})
-					if answer.status == "respond" then
-						-- Adjudicate first: the answer becomes typed ledger
-						-- mutations before any fix turn, and the ask's prompt
-						-- line, the verbatim answer, and the applied mutations
-						-- are recorded in the ledger's decisions record.
-						local mutations = runAdjudication(
-							judgeAgent,
-							`pr-review-adjudicate:{iteration}`,
-							config.judgeSessionConfig,
-							config.workingDir,
-							buildAdjudicationPrompt(prUrl, answer.text, triggered, ledger)
-						)
-						local applied = applyMutations(ledger, mutations)
-						table.insert(ledger.decisions, {
-							prompt = promptLine,
-							answer = answer.text,
-							mutations = applied,
-						})
-						persist()
-						-- Only an adjudicated fix sends the answer verbatim to
-						-- the still-open work session (no header, no framing:
-						-- the human is driving the agent), followed by the same
-						-- commit-and-push step as any fix (gated by dry-run). A
-						-- decision-only answer issues no session prompt and no
-						-- push. The iteration counts against the cap either way.
-						local hasFix = false
-						for _, mutation in applied do
-							if mutation.action == "fix" then
-								hasFix = true
-								break
-							end
-						end
-						if hasFix then
-							session:prompt(answer.text)
-							if push ~= nil then
-								session:prompt(header .. push)
-							end
-							recordFixCommit()
-						end
-						session:close()
-						iteration += 1
-						-- A decision-only adjudication that leaves no open
-						-- blocking findings converges immediately — the decision
-						-- is human-authoritative and recorded; a judge
-						-- re-confirming it over an empty delta buys a wasted
-						-- pass, not correctness. Nothing was pushed, so the
-						-- every-push-is-followed-by-a-review-pass invariant is
-						-- untouched — and with one mutation per finding, an
-						-- applied `fix` leaves its finding open, so this check
-						-- can never fire after a push.
-						if not hasOpenBlocking(ledger) then
-							return finish("converged", verdict, verdict, iteration)
-						end
-					elseif answer.status == "abort" then
-						session:close()
-						error(`pr-review: human aborted escalation (iteration {iteration + 1} of {maxIterations})`)
-					else
-						-- No ask provider served the request: today's failure,
-						-- byte-identical.
-						session:close()
-						error(
-							`pr-review: human input is required to resolve the findings (iteration {iteration + 1} of {maxIterations})`
-						)
-					end
-				else
-					-- Batched fix turn: all open blocking findings, by root
-					-- cause, followed by commit-and-push (gated by dry-run).
-					session:prompt(buildFixPrompt(prUrl, ledger, header))
-					if push ~= nil then
-						session:prompt(header .. push)
-					end
-					recordFixCommit()
-					session:close()
-					iteration += 1
+				-- Batched fix turn: all open blocking findings, by root cause,
+				-- followed by commit-and-push (gated by dry-run). An open
+				-- blocking finding carrying `needsHuman` is fixed autonomously
+				-- like any other: the flag is report-only — the loop never
+				-- asks, and the next review pass re-judges the fix.
+				session:prompt(buildFixPrompt(prUrl, ledger, header))
+				if push ~= nil then
+					session:prompt(header .. push)
 				end
+				recordFixCommit()
+				session:close()
+				iteration += 1
 			end
 			return finish("non-converged", verdict, if verdict ~= "" then verdict else nil, iteration)
 		end,
