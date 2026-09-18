@@ -3,9 +3,10 @@
 Run a convergent review→validate→fix→verify loop against a pull request:
 an agent reviews the PR freely in prose following a reviewer persona, a
 **typed judge** converts that prose into structured findings and reconciles
-them with a persistent **ledger**, and the loop converges, escalates to a
-human, or fixes and pushes — then reviews the delta. Extracted and
-generalized from identus-ws's pr-review-loop.
+them with a persistent **ledger**, and the loop converges, fixes and pushes,
+or ends at its cap — then reviews the delta. The loop **never asks a human**:
+the pull request itself, reviewed by its human at merge time, is the loop's
+human checkpoint. Extracted and generalized from identus-ws's pr-review-loop.
 
 The loop is *convergent*, not symmetric: the first pass reviews the whole PR
 (discovery); every later pass reviews only the changes since the ledger's
@@ -37,11 +38,10 @@ pass** — the loop cannot exit having just mutated the PR.
   runs). See [The PR review report](#the-pr-review-report).
 - **Fix** — when open blocking findings remain and budget remains, one batched
   fix turn addresses all of them by root cause, followed by commit-and-push
-  (gated by `dryRun`).
-- **Escalate** — the judge's `needsHuman` flag on an **open blocking** finding
-  is the loop's only escalation trigger; it routes through the stdlib's
-  `escalate` transport and the answer is adjudicated into typed ledger
-  mutations before any fix turn (see below).
+  (gated by `dryRun`). An open blocking finding carrying the judge's
+  `needsHuman` flag is fixed autonomously like any other blocking finding —
+  the flag is report-only, so nothing interrupts the loop (see
+  [needsHuman is report-only](#needshuman-is-report-only-the-pr-is-the-human-checkpoint)).
 - **Cap** — a single `maxIterations` (default 8). At the cap with open
   findings the loop ends and returns a non-converged outcome **without
   fixing** — the final unit is always a review.
@@ -107,24 +107,24 @@ The loop's state lives in a **dedicated PR comment** marked
 It carries the PR identity, the discovery SHA and the `lastReviewedSha`, the
 PR's intention, the findings (id, one-line title, family, severity, validation
 status, the judge's `needsHuman` determination, status
-`open`/`fixed`/`deferred`/`accepted`, fixing commit), the family table, the
-resolved count, and a decisions record.
+`open`/`fixed`/`deferred`/`accepted`, fixing commit), the family table, and
+the resolved count.
 
 - **Auto-resume, no flag.** A fresh `review()` against a PR whose ledger
-  comment exists resumes from it: open blocking findings drive a fix turn; a
-  clean ledger at the current head converges immediately.
-- **`needsHuman` and decisions.** Each finding carries the judge's latest
+  comment exists resumes from it: open blocking findings drive a fix turn;
+  a clean ledger at the current head converges immediately. A finding
+  carrying `needsHuman` drives the fix turn like any other open blocking
+  finding — the flag is the reviewer's pointer, not a gate.
+- **`needsHuman`.** Each finding carries the judge's latest
   `needsHuman` determination: recorded when the finding is filed, updated
-  when a later reconciliation revisits it, cleared when an adjudicated
-  decision records a mutation for it (the human's determination supersedes
-  the judge's). The report renders the flag on undecided findings' lines and
-  annotates decided findings as maintainer decisions. Every answered ask is
-  recorded in the ledger's **decisions record** — the ask's prompt line, the
-  verbatim answer, and the applied per-finding mutations with their notes,
-  in ask order, no timestamps. A ledger written before these fields existed
-  reads tolerantly (a finding without the flag is treated as not needing a
-  human, no decisions assumed) and both fields are written on the next
-  persist.
+  when a later reconciliation revisits it, and never cleared — there is no
+  mid-loop human decision to supersede it. The flag is report-only: it never
+  gates, pauses, or fails the loop, and the report renders it on open
+  findings' lines. A ledger written before the flag existed reads tolerantly
+  (a finding without the flag is treated as not needing a human) and the flag
+  is written on the next persist. Ledgers from the retired ask path may carry
+  a **decisions record**: read tolerantly, ignored, and dropped on the next
+  persist — no new decisions are ever recorded.
 - **Retention.** Once a finding's fix is verified clean in a later review
   pass, the finding is retained as a terminal one-line entry with status
   `fixed` (id, title, family, fixing commit) and the resolved count
@@ -150,9 +150,8 @@ Every terminal outcome that *returns* — converged, or non-converged at the cap
 — produces a **PR review report**: a human-facing summary of the whole loop,
 posted as a dedicated PR comment marked `<!-- ptah:pr-review-report -->` and
 **edited in place** across runs (the same marker-and-edit lifecycle as the
-ledger, so a re-run edits rather than appends). A run that *fails* — an
-aborted or unservable escalation, or reporter exhaustion — raises and posts no
-report.
+ledger, so a re-run edits rather than appends). A run that *fails* —
+reporter exhaustion — raises and posts no report.
 
 The report is authored by a dedicated **reporter agent** (`reporterAgent`,
 required; `reporterSessionConfig` optional). The reporter submits a typed
@@ -205,8 +204,31 @@ the PR; `outcome.verdict` keeps its meaning (the final review verdict text).
 ## Coverage contract
 
 This library ships no test suite: the ptah repository's offline suite owns
-coverage for this playbook's escalation semantics — the gated trigger, the
-deferred reconciliation value, and the adjudication mutations.
+updated coverage for this playbook's retired ask path (no ask is raised;
+flagged findings drive fix turns like any other blocking finding).
+
+## needsHuman is report-only (the PR is the human checkpoint)
+
+The loop never asks a human at any point, and ask-provider availability is
+irrelevant — a provider-less environment behaves identically to a served one.
+The judge's `needsHuman` flag is **report-only**: the judge sets it only on an
+open blocking finding that rests on an operator-owned decision — one the agent
+has no authority to take — that a human should examine at review, and never on
+a deferred or non-blocking finding. The flag persists in the ledger, renders
+on the finding's line in the PR review report (`, needs human`), and never
+gates, pauses, or fails the loop: an open blocking finding carrying it is fixed
+autonomously like any other blocking finding, and the next review pass re-judges
+the fix. A reconciliation record carrying the determination for an id absent
+from the ledger has no loop effect.
+
+Human decisions land at PR review time — the merge review, guided by the
+report's flags — never in the ledger mid-run. A human who disagrees with a
+run's direction lets it finish (or kills it) and rules at review time; the
+loop never fails on human refusal because there is no ask to refuse.
+
+Whether an ask *would* be served is moot: no ask is raised, so the operator's
+provider selection (`--ask` > `PTAH_ASK` > `[ask]` > TTY auto-detect) plays no
+part in this playbook.
 
 ## Config (data plus declared agent handles)
 
@@ -247,7 +269,7 @@ local loop = pr.new({
 Session-config entries (`{ id, value }`, applied in declared array
 order — see the library README's [Session config](../../README.md#session-config)
 section) reach: `sessionConfig` → each review/fix work session;
-`judgeSessionConfig` → every judge session **and every adjudication session**;
+`judgeSessionConfig` → every judge session;
 `reporterSessionConfig` → every reporter session. Option ids are
 agent-specific — enumerate what your agent offers with `session:configOptions()`.
 The removed `model`/`judgeModel` fields are nil-typed: configuring one is a
@@ -280,9 +302,9 @@ fix prompt issued).
 
   Outcomes as data, so the caller's script can gate its own post-loop steps
   (CI, gates) on the loop's end state. `report` is the exact text posted as
-  the PR review report (status line plus body). Escalation failures do not
-  appear in the outcome: an aborted or unservable ask raises, so the returned
-  status is always `converged` or `non-converged`.
+  the PR review report (status line plus body). The returned status is always
+  `converged` or `non-converged` — the loop never asks, so no escalation
+  failure exists, and reporter exhaustion is the only failure that raises.
 
 With `dryRun = true` the commit-and-push step is skipped entirely: the loop
 still reviews, judges, and fixes, but never pushes to the PR branch — a gate
@@ -292,70 +314,6 @@ report is still posted: dry-run gates the branch, not the PR conversation.
 The playbook ships facade-only (`:review`). A `run()` daemon convenience
 (looping over open PRs) was deliberately deferred: it is sugar over
 `std.daemon` + `:review` and can be added without breaking the facade.
-
-## Escalation (gated trigger, adjudicated answers)
-
-The loop's only escalation trigger is the judge's `needsHuman` flag **on a
-finding that gates convergence**: the loop asks only when an open, blocking
-finding carries it — whether raised as a new finding or through a
-reconciliation record. A reconciliation record triggers only when the ledger
-finding it names by id is itself open and blocking; a record naming an id
-absent from the ledger never escalates. `needsHuman` on a non-blocking or
-deferred finding does not ask: the concern surfaces in the review prose and
-the posted report, with the flag persisted in the ledger. (There is no
-separate probe session.)
-
-When the trigger fires, the loop escalates through the stdlib's `escalate`
-transport: it pauses on an ask — the work session stays open — whose prompt
-line identifies the loop, the PR URL, and the iteration state, and **names
-every triggering finding** (id, family, severity, title):
-`pr-review https://github.com/o/r/pull/42: human input required (iteration 2
-of 8) — decision needed on: f3 (blocking, family sync): …`. The details open
-with the answer grammar the loop understands — `defer <id>`, `accept <id>`,
-`fix: <instructions>` — then carry the work session's label, the agent-side
-ACP session id, and the **full** review prose, untruncated. Three outcomes:
-
-- **respond** — the answer is **adjudicated before any fix turn**: a typed
-  adjudication session (the judge agent under a dedicated result schema,
-  `pr-review-adjudicate:{iteration}`) receives the verbatim answer, the
-  triggering findings, and the ledger, and returns per-finding mutations:
-  `defer` (open → deferred) and `accept` (open → accepted), each with an
-  optional note, and `fix` (the finding stays open — the answer's text
-  directs its fix). Mutations target existing open findings only: ids that
-  are unknown or already terminal are no-ops, adjudication never creates
-  findings, and the contract is one decision per finding — when an answer
-  names a finding more than once, only the last mutation applies (so a
-  pushed fix turn always leaves its finding open and is always followed by
-  a review pass). The ask's prompt line, the verbatim answer, and the applied
-  mutations are recorded in the ledger's decisions record, and the decided
-  findings' `needsHuman` flags clear. When the adjudication includes at
-  least one `fix` mutation, the answer is sent verbatim as the next prompt
-  of the still-open work session (no header, no framing: the human is
-  driving the agent) and the commit-and-push step follows the human-guided
-  fix exactly as it follows any fix (gated by `dryRun`); a decision-only
-  answer issues no work-session prompt and no push. The iteration counts
-  against the cap either way, and when a decision-only adjudication leaves
-  no open blocking findings the loop converges immediately — no further
-  review pass. An adjudication session that submits no typed result is
-  retried a bounded number of times; exhaustion fails the iteration — never
-  a silent mutation.
-- **abort** (the human refused the ask) — the operation fails with
-  `pr-review: human aborted escalation (iteration N of M)` and no fix is
-  issued.
-- **unavailable** (no ask provider served the request: prohibited,
-  unconfigured, provider failure, or end of input) — the operation fails with
-  the same wording as before asks existed: `pr-review: human input is
-  required to resolve the findings (iteration N of M)`.
-
-Whether an ask is served is the operator's provider selection
-(`--ask` > `PTAH_ASK` > `[ask]` > TTY auto-detect), never playbook
-config — a provider-less environment keeps the pre-ask failure
-behavior exactly.
-
-Asks display the work session's ptah label (what the run's rendered
-stream is keyed by) and the agent-side ACP session id
-(`session:sessionId()`) — the id the agent's own tooling can resume or
-list — so a human can correlate the ask with the session.
 
 ## Migration notes (identus-ws lineage)
 
@@ -372,8 +330,8 @@ This is a breaking reshape. Every breaking item in the change proposal:
 - **The converged work-session comment is replaced by the PR review
   report.** The converged work session no longer posts a comment; the
   playbook posts the report on every returned terminal outcome (converged and
-  capped). Read `outcome.report` for the posted text. A failed run (aborted
-  or unservable ask, reporter exhaustion) raises and posts no report.
+  capped). Read `outcome.report` for the posted text. A failed run (reporter
+  exhaustion) raises and posts no report.
 - **The ledger retains resolved findings** as terminal `fixed` entries
   instead of collapsing them into a count. The report caps its resolved list
   at 50; the ledger grows with the PR.
@@ -385,9 +343,10 @@ This is a breaking reshape. Every breaking item in the change proposal:
   is no longer asked to classify findings. Move the repository's blocking
   taxonomy into `blockingAdditions`.
 - **`blockingAdditions` is new** (optional free text supplied to the judge).
-- **The escalation probe wording changes** — there is no probe session; the
-  judge's `needsHuman` flag is the trigger. Abort/unavailable error wording is
-  unchanged.
+- **The escalation probe wording changes** — there is no probe session and,
+  since the ask's retirement, no trigger either: the judge's `needsHuman`
+  flag is report-only and the loop raises no ask
+  (see [needsHuman is report-only](#needshuman-is-report-only-the-pr-is-the-human-checkpoint)).
 - **Loop shape changes** — full discovery once, delta reviews thereafter, a
   persistent ledger comment, and no fix on the final unit.
 
@@ -406,7 +365,7 @@ This is a breaking reshape. Every breaking item in the change proposal:
   so the directory rename needs no consumer edit.
 - **Persisted wire and wording are frozen.** The ledger/report markers
   (`<!-- ptah:pr-review-ledger -->`, `<!-- ptah:pr-review-report -->`), the
-  `pr-review:` error/ask prefixes, and the session-id prefixes stay
+  `pr-review:` error prefixes, and the session-id prefixes stay
   byte-stable — in-flight ledgers and existing PR comments are not orphaned.
 
 The previous export name remains at the prior tag; consumers pin it to defer

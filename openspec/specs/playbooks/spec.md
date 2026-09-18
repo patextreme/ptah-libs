@@ -474,14 +474,28 @@ verify converges verification then syncs and archives the change. The
 playbook SHALL declare its environment requirements (an agent carrying the
 openspec skills, `openspec` on PATH) in its documentation rather than
 bundling or installing them. Convergence is the playbook's own loop over
-the library's typed judge: a judge-rejected pass probes for human input;
-a confirmed need for human input escalates through the library's escalation
-mechanism — a served ask resumes the loop with the human's answer, and an
-unservable or refused ask fails the operation without issuing a fix — and
-exhausting the iteration cap fails the operation with an error reporting
-the cap.
+the library's typed judge: a judge-rejected pass probes the work session,
+and the probe's claim is judged by a typed predicate. An ask is justified
+only by an operator-owned decision — one the agent has no authority to
+take and the loop cannot reverse at bounded cost; product direction,
+architecture, and scope are examples in the prompt copy, not gates. A
+confirmed operator-owned decision escalates through the library's
+escalation mechanism — a served ask resumes the loop with the human's
+answer, and an unservable or refused ask fails the operation without
+issuing a fix. A confirmation, an approval to proceed, or a recoverable
+choice (a decision whose wrong outcome the judge's next rejection
+repairs) never escalates: the claim fails the predicate and the loop
+issues the fix prompt. Exhausting the iteration cap fails the operation
+with an error reporting the cap.
 
-On a confirmed need for human input, the playbook SHALL ask through the
+Every work prompt SHALL carry a component-owned autonomy clause
+instructing the agent to make judgment calls autonomously, note each in
+the pass output, and never wait for confirmation; the clause SHALL NOT be
+configurable away. The noted judgment calls ride the pass output, so the
+operation's returned text carries every autonomous decision the agent
+took.
+
+On a confirmed operator-owned decision, the playbook SHALL ask through the
 library's escalation mechanism with an ask whose prompt line identifies
 the operation, the change, and the iteration state, and whose details
 carry the work session's label and the full probe text. When the ask is
@@ -527,22 +541,32 @@ groom and verify SHALL remain whole-change operations.
 
 #### Scenario: Human escalation
 
-- **WHEN** a groom pass is judge-rejected and the escalation judge confirms human input is required
+- **WHEN** a groom pass is judge-rejected and the escalation judge confirms the pass cannot proceed without an operator-owned decision
 - **THEN** the need escalates through the library's escalation mechanism — an answered ask resumes the loop with the human's answer; an aborted or unservable ask fails the operation with an error stating human input is needed, and no fix prompt is issued
+
+#### Scenario: Confirmation-seeking never escalates
+
+- **WHEN** a judge-rejected pass's probe asks for confirmation, approval to proceed, or a choice among reasonable alternatives, and the escalation judge finds no operator-owned decision in the probe
+- **THEN** no ask is raised; the predicate returns false, the loop issues the fix prompt, and the agent decides autonomously, noting the judgment call in its pass output
+
+#### Scenario: Work prompts carry the autonomy clause
+
+- **WHEN** any operation composes a work prompt
+- **THEN** the component-owned autonomy clause is appended — instructing the agent to make judgment calls autonomously, note each in the pass output, and never wait for confirmation — and the noted judgment calls ride the operation's returned text
 
 #### Scenario: Human escalation asks and resumes
 
-- **WHEN** a groom pass is judge-rejected, the escalation judge confirms human input is required, an ask provider serves the request, and the human answers
+- **WHEN** a groom pass is judge-rejected, the escalation judge confirms an operator-owned decision is required, an ask provider serves the request, and the human answers
 - **THEN** the answer is sent verbatim as the next prompt of the still-open work session, the iteration counts against the cap, and the loop continues toward convergence
 
 #### Scenario: Human escalation abort fails
 
-- **WHEN** a groom pass is judge-rejected, the escalation judge confirms human input is required, an ask provider serves the request, and the human aborts the ask
+- **WHEN** a groom pass is judge-rejected, the escalation judge confirms an operator-owned decision is required, an ask provider serves the request, and the human aborts the ask
 - **THEN** the operation fails with a distinct error stating the human aborted the escalation, and no fix prompt is issued
 
 #### Scenario: Unservable ask fails as before
 
-- **WHEN** a groom pass is judge-rejected, the escalation judge confirms human input is required, and no ask provider serves the request
+- **WHEN** a groom pass is judge-rejected, the escalation judge confirms an operator-owned decision is required, and no ask provider serves the request
 - **THEN** the operation fails with an error stating human input is needed — the same wording as before the ask existed — and no fix prompt is issued
 
 #### Scenario: Ask carries identity, session label, ACP session id, and full probe text
@@ -635,52 +659,24 @@ The work session SHALL NOT post to the pull request. For every terminal outcome 
 returns (converged or non-converged), the playbook SHALL produce a PR review report
 per the PR review report requirement.
 
-The loop's only escalation trigger is the judge's `needsHuman` flag on a finding that
-gates convergence: the loop SHALL ask only when an open, blocking finding carries
-`needsHuman`, whether raised as a new finding or through a reconciliation record. A
-reconciliation record SHALL trigger the ask only when the ledger finding it names by
-id is itself open and blocking; a record naming an id absent from the ledger SHALL
-never trigger an ask. The `needsHuman` flag on a non-blocking or deferred finding
-SHALL NOT trigger an ask: the concern surfaces in the review prose and the posted
-report, with the flag persisted in the ledger.
-
-When the trigger fires, the loop SHALL ask through the library's escalation mechanism
-with an ask whose prompt line identifies the loop, the PR URL, and the iteration
-state, and names every triggering finding (id, family, severity, title); the details
-SHALL carry the answer grammar the loop understands (`defer <id>`,
-`accept <id>`, `fix: <instructions>`), the work session's label, the agent-side ACP
-session id, and the full review prose without truncation.
-
-When the ask is answered, the answer SHALL be adjudicated before any fix turn: a
-typed adjudication session — the judge agent under a dedicated result schema —
-receives the verbatim answer, the triggering findings, and the ledger, and returns
-per-finding mutations: `defer` (the finding transitions open → deferred) and `accept`
-(open → accepted), each with an optional note, and `fix` (the finding stays open and
-the answer directs its fix). Mutations SHALL target existing open findings only: ids
-that are unknown or already terminal are no-ops, and adjudication SHALL NOT create
-findings. The contract SHALL be one decision per finding: when the adjudication names
-a finding id more than once, only its last mutation SHALL apply, so an applied `fix`
-mutation always leaves its finding open and a pushed fix turn is always followed by a
-review pass. The ask's prompt line, the verbatim answer, and the applied mutations SHALL
-be recorded in the ledger's decisions record, and a decided finding's persisted
-`needsHuman` flag SHALL be cleared. When the adjudication includes at least one `fix`
-mutation, the answer text SHALL be sent verbatim as the next prompt of the
-still-open work session (no header or framing added), and the commit-and-push step
-SHALL follow (gated by dry-run as any fix). A decision-only answer (no `fix`
-mutation) SHALL issue no work-session prompt and no commit-and-push. The iteration
-SHALL count against the cap either way, and the loop SHALL continue toward
-convergence; when a decision-only adjudication leaves no open blocking findings, the
-loop SHALL converge immediately without a further review pass. When the human aborts
-the ask, the operation SHALL fail with a distinct error stating the human aborted
-the escalation. When no ask provider serves the request, the operation SHALL fail
-with an error stating human input is needed to resolve the findings. An adjudication
-session that submits no typed result SHALL be retried a bounded number of times, and
-exhaustion SHALL fail the iteration — never a silent mutation.
+The loop SHALL NOT ask a human at any point: the pull request itself, reviewed by
+its human at merge time, is the loop's human checkpoint. The judge's `needsHuman`
+flag is report-only: the judge SHALL set it only on an open blocking finding that
+rests on an operator-owned decision — one the agent has no authority to take — that
+a human should examine at review; the flag SHALL NOT be set on a deferred or
+non-blocking finding. The flag persists in the ledger, renders on the finding's line
+in the PR review report, and never gates, pauses, or fails the loop: an open
+blocking finding carrying `needsHuman` is fixed autonomously like any other
+blocking finding. A `needsHuman` determination on a non-blocking or deferred
+finding, and a reconciliation record naming an id absent from the ledger, have no
+loop effect: the determination persists and renders in the report. Legacy ledgers
+carrying a decisions record or `accepted` findings SHALL be read tolerantly; no new
+decisions are recorded.
 
 The playbook's config SHALL accept `agent` and the required `judgeAgent` and
 `reporterAgent` handles, `sessionConfig` (applied to every work session the playbook
-creates), `judgeSessionConfig` (applied to every judge session and every adjudication
-session), `reporterSessionConfig` (applied to every reporter session),
+creates), `judgeSessionConfig` (applied to every judge session),
+`reporterSessionConfig` (applied to every reporter session),
 `reviewInstruction` (persona, per the instruction contract), `blockingAdditions`
 (free text supplied to the judge defining what counts as blocking for the
 repository), `dryRun`, and `maxIterations` (default 8). The `model` and `judgeModel`
@@ -690,10 +686,7 @@ and the entry order is the consumer's `setConfig` order.
 The `review` operation SHALL return a typed outcome carrying a status
 (`converged` / `non-converged`), the final verdict text, the final ledger snapshot,
 and the posted report text (`report`) — outcomes as data, matching the library's
-transport conventions — rather than a bare verdict string. Escalation failures do not appear in the outcome: an
-aborted or unservable ask fails the operation with an error, and an answered ask
-continues the loop toward convergence, so the returned status is always
-`converged` or `non-converged`.
+transport conventions — rather than a bare verdict string.
 
 #### Scenario: First pass reviews the whole PR
 
@@ -717,8 +710,78 @@ continues the loop toward convergence, so the returned status is always
 
 #### Scenario: Review finds fixable findings
 
-- **WHEN** the judge's typed output reports open blocking findings and budget remains, and the judge flags `needsHuman` on no open blocking finding
-- **THEN** the work session is prompted to resolve all of them in one fix turn addressing the root cause, followed by commit-and-push (gated by dry-run), iterating until the review converges or escalation occurs
+- **WHEN** the judge's typed output reports open blocking findings and budget remains
+- **THEN** the work session is prompted to resolve all of them in one fix turn addressing the root cause — including any carrying `needsHuman` — followed by commit-and-push (gated by dry-run), iterating until the review converges or the cap ends the loop
+
+#### Scenario: needsHuman is report-only
+
+- **WHEN** the judge flags `needsHuman` on an open blocking finding
+- **THEN** the loop issues the fix turn for it like any other blocking finding, no ask is raised, the flag persists in the ledger, and the PR review report renders it on the finding's line for the reviewing human
+
+#### Scenario: Resume auto-fixes flagged findings
+
+- **WHEN** a fresh `review` operation resumes a ledger holding an open blocking finding carrying `needsHuman`
+- **THEN** the resume fast path issues the fix turn for it like any other open blocking finding, without an ask — the flag is the reviewer's pointer, not a gate
+
+#### Scenario: Non-blocking needsHuman does not ask
+
+- **WHEN** the judge flags `needsHuman` on a non-blocking or deferred finding and open blocking findings exist
+- **THEN** no ask exists to raise — the loop issues the batched fix turn for the open blocking findings, and the flagged concern's `needsHuman` determination is persisted in the ledger and rendered in the PR review report
+
+#### Scenario: Unknown reconciliation id never escalates
+
+- **WHEN** a reconciliation record flags `needsHuman` naming an id that matches no ledger finding
+- **THEN** the record has no loop effect — no ask exists to trigger — and the loop proceeds by its convergence state alone
+
+#### Scenario: Answer is adjudicated before any fix turn
+
+- **WHEN** a review pass reports open blocking findings (the moment that previously raised an ask)
+- **THEN** no adjudication occurs — no ask is raised and no answer path exists; the loop proceeds directly by its convergence state (fix turn, or converge)
+
+#### Scenario: Human decision reaches the ledger
+
+- **WHEN** a human reviews the PR after a loop run
+- **THEN** human decisions land at PR review time — the merge review, guided by the report's `needsHuman` flags — never in the ledger mid-run; legacy decisions records are read tolerantly and no new ones are written
+
+#### Scenario: Human escalation asks and resumes
+
+- **WHEN** the judge flags `needsHuman` on an open blocking finding
+- **THEN** the loop asks nothing — the flagged finding drives the fix turn autonomously like any other blocking finding, and the next review pass re-judges the fix
+
+#### Scenario: Decision-only adjudication converges immediately
+
+- **WHEN** a review pass leaves no open blocking findings
+- **THEN** the loop converges — convergence is computed solely from open blocking findings; no decision path exists to converge it earlier
+
+#### Scenario: Adjudication mutations are inert on unknown or terminal ids
+
+- **WHEN** the loop processes a judge pass
+- **THEN** no mutations exist — the ledger's only writers are filing (open or deferred), reconciliation (resolved or updated), and verification (fixed); no mid-run path writes finding status by human decision
+
+#### Scenario: Duplicate adjudication ids keep the last decision
+
+- **WHEN** a judge pass reports findings
+- **THEN** no per-finding human decision exists to duplicate or order — ids are assigned at filing and never mutated by a decision
+
+#### Scenario: Adjudication exhaustion fails the iteration
+
+- **WHEN** a typed session submits no result on every attempt up to the bound
+- **THEN** the judge session's bounded retry and exhaustion behavior is the only typed-result retry in the loop — the adjudication session no longer exists
+
+#### Scenario: Ask carries identity, session label, ACP session id, and full probe text
+
+- **WHEN** the loop runs to a terminal outcome
+- **THEN** no ask is raised, so no ask payload exists; the report comment is the only human-facing channel, and it carries the ledger, the flags, and the prose
+
+#### Scenario: Human escalation abort fails
+
+- **WHEN** a run reaches the moment that previously raised an ask a human could abort
+- **THEN** no ask exists to abort — the operation never fails on human refusal; a human who disagrees with a run's direction lets it finish (or kills it) and rules at PR review time
+
+#### Scenario: Unservable ask fails as before
+
+- **WHEN** the loop runs in an environment with no ask provider
+- **THEN** ask-provider availability is irrelevant — no ask is raised, so a provider-less environment behaves identically to a served one
 
 #### Scenario: Fix never consumes the last unit
 
@@ -738,72 +801,12 @@ continues the loop toward convergence, so the returned status is always
 #### Scenario: Deferred findings do not gate convergence
 
 - **WHEN** the judge defers a finding as important but outside the PR's intention
-- **THEN** the finding is recorded with a deferred status, the loop may converge with it open, the PR review report lists it under deferred findings, and it does not trigger an ask even when it carries `needsHuman`
+- **THEN** the finding is recorded with a deferred status, the loop may converge with it open, and the PR review report lists it under deferred findings
 
 #### Scenario: Deferred recurrence reconciles by id
 
 - **WHEN** a later review pass flags a concern matching a deferred ledger finding
 - **THEN** the judge's reconciliation reports it against the existing finding's id as still deferred, and the ledger records no duplicate entry for the same concern
-
-#### Scenario: Non-blocking needsHuman does not ask
-
-- **WHEN** the judge flags `needsHuman` on a non-blocking or deferred finding and open blocking findings exist
-- **THEN** no ask is raised; the loop issues the batched fix turn for the open blocking findings, and the flagged concern's `needsHuman` determination is persisted in the ledger and rendered in the PR review report
-
-#### Scenario: Unknown reconciliation id never escalates
-
-- **WHEN** a reconciliation record flags `needsHuman` naming an id that matches no ledger finding
-- **THEN** the record does not trigger an ask, and the loop proceeds by its convergence state alone
-
-#### Scenario: Answer is adjudicated before any fix turn
-
-- **WHEN** an ask is answered
-- **THEN** a typed adjudication session returns per-finding mutations derived from the verbatim answer and the ledger, and the mutations are applied to the ledger before any work-session prompt is issued
-
-#### Scenario: Human decision reaches the ledger
-
-- **WHEN** the judge flags `needsHuman` on an open blocking finding and the ask is answered with a deferral for that finding
-- **THEN** adjudication transitions the finding to deferred with the decision note, clears its `needsHuman` flag, records the ask's prompt line, the verbatim answer, and the mutations in the ledger's decisions record, issues no work-session prompt and no commit-and-push, and the loop does not re-ask the same finding
-
-#### Scenario: Human escalation asks and resumes
-
-- **WHEN** the judge flags `needsHuman` on an open blocking finding, an ask provider serves the request, and the human answers
-- **THEN** the answer is adjudicated into typed ledger mutations before any fix turn; when the adjudication includes a `fix` mutation, the answer is sent verbatim as the next prompt of the still-open work session and the commit-and-push step follows (gated by dry-run as any fix); the iteration counts against the cap, and the loop continues toward convergence
-
-#### Scenario: Decision-only adjudication converges immediately
-
-- **WHEN** an adjudication applies only defer or accept mutations and leaves no open blocking findings
-- **THEN** the loop converges without a further review pass, and the PR review report annotates the decided findings as maintainer decisions
-
-#### Scenario: Adjudication mutations are inert on unknown or terminal ids
-
-- **WHEN** the adjudication output names a finding id that is unknown or already terminal
-- **THEN** no mutation is applied for that id and the loop proceeds
-
-#### Scenario: Duplicate adjudication ids keep the last decision
-
-- **WHEN** the adjudication returns more than one mutation for the same finding id
-- **THEN** only the last mutation for that id is applied and recorded, and a `fix` for a finding the same batch defers or accepts issues no fix turn and no push
-
-#### Scenario: Adjudication exhaustion fails the iteration
-
-- **WHEN** the adjudication session submits no typed result on every attempt up to the bound
-- **THEN** the iteration fails with a script error naming the adjudication session and the attempt count, and no ledger mutation is applied
-
-#### Scenario: Ask carries identity, session label, ACP session id, and full probe text
-
-- **WHEN** the loop raises an escalation ask
-- **THEN** the prompt line identifies the loop, the PR URL, and the iteration state and names every triggering finding (id, family, severity, title), and the details carry the answer grammar (`defer <id>`, `accept <id>`, `fix: <instructions>`), the work session's label, the agent-side ACP session id, and the full review prose (the probe payload in this design) without truncation
-
-#### Scenario: Human escalation abort fails
-
-- **WHEN** the judge flags `needsHuman` on an open blocking finding, an ask provider serves the request, and the human aborts the ask
-- **THEN** the operation fails with a distinct error stating the human aborted the escalation, and no fix is issued
-
-#### Scenario: Unservable ask fails as before
-
-- **WHEN** the judge flags `needsHuman` on an open blocking finding and no ask provider serves the request
-- **THEN** the operation fails with an error stating human input is needed to resolve the findings — the same wording as before the ask existed — and no fix is issued
 
 #### Scenario: Repository context is per-call
 
@@ -823,7 +826,7 @@ continues the loop toward convergence, so the returned status is always
 #### Scenario: Judge and probe sessions receive judge session config
 
 - **WHEN** the playbook is configured with `judgeSessionConfig` entries and the review loop runs
-- **THEN** every judge session and every adjudication session receives the entries in declared order before its prompt
+- **THEN** every judge session receives the entries in declared order before its prompt
 
 #### Scenario: Removed model field is a type error
 
@@ -832,8 +835,8 @@ continues the loop toward convergence, so the returned status is always
 
 #### Scenario: Operation returns a typed outcome
 
-- **WHEN** the `review` operation ends — converged, or non-converged at the cap (including a run whose last unit followed an answered ask)
-- **THEN** the operation returns a typed outcome carrying the status (`converged` / `non-converged`), the final verdict text, the final ledger snapshot, and the report text, rather than only a verdict string, and an escalation failure raises an error instead of returning an outcome
+- **WHEN** the `review` operation ends — converged, or non-converged at the cap
+- **THEN** the operation returns a typed outcome carrying the status (`converged` / `non-converged`), the final verdict text, the final ledger snapshot, and the report text, rather than only a verdict string
 
 ### Requirement: PR review instruction contract
 
@@ -908,31 +911,31 @@ the PR's intention (the PR title and body when present; otherwise the last commi
 message before the first ledger record, captured at discovery), the findings with
 their id, family, severity, validation status, the judge's `needsHuman` determination,
 status (`open` / `fixed` / `deferred` / `accepted`), and fixing commit where
-applicable, the family table, and a decisions record. The decisions record SHALL
-carry, for every answered ask in ask order (no timestamps), the ask's prompt line, the
-verbatim answer, and the applied per-finding mutations with their notes. The ledger
-SHALL be playbook-owned data; the documentation SHALL state that hand-editing it is
-unsupported, that a deleted ledger degrades a fresh run to a new discovery pass
-(today's per-run behavior), and that one loop per PR is an environment requirement
-(two concurrent loops on one PR corrupt the in-place comment update).
+applicable, and the family table. The ledger SHALL be playbook-owned data; the
+documentation SHALL state that hand-editing it is unsupported, that a deleted ledger
+degrades a fresh run to a new discovery pass (today's per-run behavior), and that one
+loop per PR is an environment requirement (two concurrent loops on one PR corrupt
+the in-place comment update). Legacy ledgers carrying a decisions record SHALL be
+read tolerantly; no new decisions are recorded.
 
 A finding's `needsHuman` flag SHALL be recorded when the finding is filed, SHALL be
 updated whenever a later reconciliation revisits the finding (the judge's latest
-determination wins), and SHALL be cleared when an adjudicated decision records a
-mutation for the finding (the human's determination supersedes the judge's). A ledger
-written before the flag existed SHALL be read tolerantly: a finding without the field
-is treated as not needing a human, and the field is written on the next persist.
+determination wins), and never clears — there is no mid-loop human decision to
+supersede it. A ledger written before the flag existed SHALL be read tolerantly: a
+finding without the field is treated as not needing a human, and the field is
+written on the next persist.
 
-Finding status SHALL be written by the reconciliation path (open → fixed when a fix
-is verified clean) and the adjudication path (open → deferred, open → accepted, by
-recorded human decision). Deferred and accepted are terminal: they have no exit
-transitions, and a deferred concern that becomes in-scope again is filed as a new
-open finding.
+Finding status SHALL be written by the judge at filing (open, or deferred for
+out-of-scope concerns) and by the reconciliation path (open → fixed when a fix is
+verified clean). Deferred is terminal: it has no exit transitions, and a deferred
+concern that becomes in-scope again is filed as a new open finding. `accepted` is a
+legacy status: read tolerantly, terminal, and no new transition writes it (its only
+writer was the retired adjudication path).
 
 A fresh `review` operation SHALL resume automatically from an existing ledger without
 a resume flag: no ledger means a fresh discovery pass; an existing ledger means the
-loop continues from its state (open blocking findings → fix turn; a clean ledger at
-the current head → converge).
+loop continues from its state (open blocking findings — regardless of any
+`needsHuman` flag — drive a fix turn; a clean ledger at the current head converges).
 
 Once a finding's fix has been verified clean in a later review pass, the playbook
 SHALL retain it as a terminal one-line entry with status `fixed` — its id, title,
@@ -949,28 +952,28 @@ comment limit fails loudly through the transport rather than truncating.
 
 #### Scenario: needsHuman flag persists, updates, and clears
 
-- **WHEN** a finding is filed with `needsHuman` flagged, a later reconciliation revisits the finding, and an adjudicated decision records a mutation for it
-- **THEN** the ledger carries the judge's latest determination until the decision lands, then shows the flag cleared, and the PR review report renders the flag on undecided findings' lines and the maintainer-decision annotation on decided ones
+- **WHEN** a finding is filed with `needsHuman` flagged and a later reconciliation revisits the finding
+- **THEN** the ledger carries the judge's latest determination and the flag never clears — no mid-loop human decision exists to supersede it — and the PR review report renders it on the finding's line
 
 #### Scenario: Decisions recorded on answered asks
 
-- **WHEN** an ask is answered and adjudicated
-- **THEN** the ledger's decisions record gains an entry carrying the ask's prompt line, the verbatim answer, and the applied mutations with their notes, ordered by ask with no timestamps
+- **WHEN** the loop reads a ledger carrying a decisions record from before the ask was retired
+- **THEN** no new decisions are recorded — the decisions record is never written; legacy entries are read tolerantly and dropped on the next persist
 
 #### Scenario: Legacy ledgers read tolerantly
 
-- **WHEN** the loop reads a ledger written before the `needsHuman` field and the decisions record existed
-- **THEN** findings parse without the field and are treated as not needing a human, no decisions are assumed, and both are written on the next persist
+- **WHEN** the loop reads a ledger written before the `needsHuman` field existed, or one carrying a decisions record or `accepted` findings from before the ask was retired
+- **THEN** findings parse without the field and are treated as not needing a human, decisions are ignored, `accepted` findings stay terminal, and the flag field is written on the next persist
 
 #### Scenario: Fresh run resumes from the ledger
 
 - **WHEN** a new `review` operation runs against a PR whose ledger comment exists (e.g. after a previous run ended at the cap)
-- **THEN** the loop resumes from the ledger's state without a resume flag — open blocking findings drive a fix turn, a clean ledger at the current head converges immediately
+- **THEN** the loop resumes from the ledger's state without a resume flag — open blocking findings (flagged or not) drive a fix turn, a clean ledger at the current head converges immediately
 
 #### Scenario: Ledger updated in place after each phase
 
 - **WHEN** a review pass or fix turn completes
-- **THEN** the ledger comment is updated in place (never appended as a new comment) reflecting the new `lastReviewedSha`, finding statuses, `needsHuman` flags, decisions, and family table
+- **THEN** the ledger comment is updated in place (never appended as a new comment) reflecting the new `lastReviewedSha`, finding statuses, `needsHuman` flags, and family table
 
 #### Scenario: Intention fallback
 
@@ -993,8 +996,7 @@ The pr-review-loop playbook SHALL produce a **PR review report** — a human-fac
 summary of the whole review — as a pull-request comment marked
 `<!-- ptah:pr-review-report -->` and edited in place across runs, for every terminal
 outcome of a `review` operation that returns (converged and non-converged). A `review`
-operation that fails — an aborted or unservable escalation, or reporter exhaustion —
-SHALL NOT produce a report.
+operation that fails — reporter exhaustion — SHALL NOT produce a report.
 
 The report SHALL be authored by a dedicated reporter agent: a required
 `reporterAgent` config handle and an optional `reporterSessionConfig` (applied to
@@ -1012,12 +1014,13 @@ so the report's convergence claim is never agent-authored. The reporter SHALL au
 the remainder of the body under a playbook-defined section contract.
 
 The report body SHALL cover: the PR's intention; the resolved findings as one-line
-entries; the open non-blocking findings; the deferred findings; the accepted findings;
-and a loop summary (iterations, discovery and last-reviewed SHAs, and the family
-table). For a non-converged outcome the report SHALL lead with an open blocking
-findings section beneath the status line. The resolved findings list SHALL be capped
-at 50 entries with a note of how many earlier entries are omitted, so the report stays
-readable while the ledger retains every entry.
+entries; the open non-blocking findings; the deferred findings; the accepted findings
+(legacy ledgers only — no new run produces them); and a loop summary (iterations,
+discovery and last-reviewed SHAs, and the family table). For a non-converged outcome
+the report SHALL lead with an open blocking findings section beneath the status line.
+The resolved findings list SHALL be capped at 50 entries with a note of how many
+earlier entries are omitted, so the report stays readable while the ledger retains
+every entry.
 
 The reporter session SHALL receive the full ledger, the terminal status, and the
 required section contract, so the report reflects the whole loop rather than the last

@@ -54,6 +54,14 @@ export type Instance = {
 
 local DEFAULT_MAX_ITERATIONS = 10
 
+-- The component-owned autonomy clause, appended to every work prompt here
+-- in drive()'s prompt composition — one site covering all three operations.
+-- Component-owned like the protocol layer, so it cannot be configured away:
+-- judgment calls are the agent's to take (only an operator-owned decision
+-- escalates), the pass output must surface each call it made, and
+-- confirmation-seeking never pays because the loop re-judges every pass.
+local AUTONOMY_CLAUSE = "Make judgment calls autonomously, note each in your output as 'judgment call: …', the loop re-judges every pass, and never wait for confirmation."
+
 local M = {}
 
 function M.new(config: Config): Instance
@@ -84,7 +92,7 @@ function M.new(config: Config): Instance
 			local session: Session = work:session({ id = `{sessionId}:{iteration}`, cwd = config.workingDir })
 			sessionConfig.apply(session, config.sessionConfig)
 
-			local outcome = session:prompt(header .. prompt)
+			local outcome = session:prompt(header .. prompt .. "\n\n" .. AUTONOMY_CLAUSE)
 			if
 				predicate(opts.accepted, outcome.text, {
 					agent = config.judgeAgent,
@@ -149,8 +157,8 @@ function M.new(config: Config): Instance
 				drive("opsx-groom", `Review the openspec change named {change} using the openspec-review skill`, {
 					change = change,
 					accepted = "The review does not contain any blocker findings",
-					probePrompt = "For the blocking findings, do you know how to resolve them, or do you need human input?",
-					humanPredicate = "Human input is required to resolve the blocking findings",
+					probePrompt = "For the blocking findings, resolve them yourself and let the loop re-judge the result — make any judgment call autonomously and proceed with the option you judge best. Ask for human input only when a finding requires an operator-owned decision you have no authority to take (for example product direction, architecture, or scope) whose wrong outcome the loop cannot reverse at bounded cost; if so, state that decision. A confirmation, an approval to proceed, or a mechanical choice does not count — pick one and proceed.",
+					humanPredicate = "Resolving the blocking findings requires an operator-owned decision — one the agent has no authority to take and the loop cannot reverse at bounded cost; a confirmation or a mechanical choice does not count",
 					resolvePrompt = "Go ahead and resolve the blocking findings",
 				})
 			ptah.log(`openspec: change {change} is ready to implement`)
@@ -180,8 +188,8 @@ function M.new(config: Config): Instance
 			local text = drive("opsx-implement", prompt, {
 				change = change,
 				accepted = accepted,
-				probePrompt = "For the pause: can you resolve it yourself (for example by updating the change's artifacts per the apply skill), or does it require human input to continue?",
-				humanPredicate = "The pause requires human input to continue",
+				probePrompt = "For the pause, resolve it yourself and continue implementing — make any judgment call autonomously (for example updating the change's artifacts per the apply skill) and proceed with the option you judge best. Ask for human input only when continuing requires an operator-owned decision you have no authority to take (for example product direction, architecture, or scope) whose wrong outcome the loop cannot reverse at bounded cost; if so, state that decision. A confirmation, an approval to proceed, or a mechanical choice does not count — pick one and proceed.",
+				humanPredicate = "Continuing requires an operator-owned decision — one the agent has no authority to take and the loop cannot reverse at bounded cost; a confirmation or a mechanical choice does not count",
 				resolvePrompt = "Go ahead and resolve the pause yourself, then continue implementing the remaining tasks",
 			})
 			ptah.log(`openspec: change {change} is implemented`)
@@ -195,8 +203,8 @@ function M.new(config: Config): Instance
 				{
 					change = change,
 					accepted = "The verification does not contain critical findings or warnings",
-					probePrompt = "For the critical findings and warnings, do you know how to resolve them, or do you need human input?",
-					humanPredicate = "Human input is required to resolve the critical findings and warnings",
+					probePrompt = "For the critical findings and warnings, resolve them yourself and let the loop re-judge the result — make any judgment call autonomously and proceed with the option you judge best. Ask for human input only when a finding requires an operator-owned decision you have no authority to take (for example product direction, architecture, or scope) whose wrong outcome the loop cannot reverse at bounded cost; if so, state that decision. A confirmation, an approval to proceed, or a mechanical choice does not count — pick one and proceed.",
+					humanPredicate = "Resolving the critical findings and warnings requires an operator-owned decision — one the agent has no authority to take and the loop cannot reverse at bounded cost; a confirmation or a mechanical choice does not count",
 					resolvePrompt = "Go ahead and resolve the critical findings and warnings",
 				}
 			)
