@@ -14,7 +14,9 @@ repo. See `../README.md` for the library contract and consumption model.
 - `worktree.luau` — git worktree lifecycle over `ptah.exec`: `provision`
   (adopt as-is / prune a stale registration and re-create /
   fast-forward-or-fail / create; never reset) and `teardown`
-  (refuse-dirty, never branches). Worktrees default under
+  (refuse-dirty, never branches); an explicit relative `parent`
+  resolves from the selected repository root and provision returns
+  git's canonical physical absolute path. Worktrees default under
   `<repo-root>/.ptah/worktree/` (pass `parent` to place them elsewhere,
   e.g. outside any checkout); `git` on PATH is a declared environment
   requirement, and so is git-ignoring `.ptah/worktree/` — without the

@@ -229,7 +229,9 @@ end
 -- The committer owns the git mechanics (commit, push, `gh pr create`) and
 -- returns the PR URL as a typed result. The branch `issue-<n>` is already
 -- created and checked out by the worktree step, so the prompt tells it to
--- stay on that branch rather than create or reuse one.
+-- stay on that branch rather than create or reuse one. The pull request
+-- body must carry `Closes #<n>`: the issue playbook has no release
+-- protocol, so the issue closing on merge is what retires the claim.
 local function openPullRequest(brief: Brief, change: string?, workingDir: string): string
 	local session = work:session({
 		id = ("factory-pr:%d"):format(brief.number),
@@ -252,6 +254,9 @@ local function openPullRequest(brief: Brief, change: string?, workingDir: string
 		summary,
 		("Your working directory is the issue's worktree, with the branch `issue-%d` already checked out. Commit the uncommitted changes (except the .ptah directory) with a Conventional Commits message that references issue #%d, push that branch to the remote, and open a pull request against main using `gh`. Do not create, rename, or switch away from the branch."):format(
 			brief.number,
+			brief.number
+		),
+		("Include `Closes #%d` in the pull request body so the issue closes when the pull request merges."):format(
 			brief.number
 		),
 		'Submit the pull request URL through this session\'s ptah result tool as { "prUrl": "https://github.com/..." }.',
