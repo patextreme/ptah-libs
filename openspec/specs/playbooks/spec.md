@@ -274,11 +274,17 @@ checkout removes nested worktree directories (a plain `git clean -fdx`
 skips nested repositories; branches survive in the shared object store;
 uncommitted state does not), and a consumer who cannot accept that passes
 `parent` explicitly to place worktrees outside the checkout. When such a
-removal (or a manual one) leaves a registration whose directory is gone,
-provision SHALL prune the stale registration and re-create the worktree
-at the same path; when the registration survives the prune (a locked
-worktree), provision SHALL raise — unlocking is never provision's act,
-and adoption never returns a path that does not exist.
+removal (or a manual one) leaves a registration whose directory is gone —
+at the target path, or at another path that holds the requested branch —
+provision SHALL prune the stale registration; a stale registration at the
+target path is re-created there from its surviving branch, and a stale
+branch occupant falls through to target resolution. When the registration
+survives the prune (a locked worktree), provision SHALL raise — unlocking
+is never provision's act, and adoption never returns a path that does not
+exist. Pruning is git's global `git worktree prune`, so resolving a stale
+registration for the requested branch may also retire another path's stale
+registration; that widening of the mechanism's one-path identity is
+accepted because a stale registration is dead state no owner can use.
 
 Provision SHALL resolve in this order, and SHALL never reset an adopted
 worktree or branch — a crashed run's unpushed commits are never silently
@@ -291,6 +297,15 @@ destroyed:
   prune (a locked worktree) raises — it is never unlocked;
 - a registered worktree at the path is **adopted as-is** (its branch must
   match; a mismatch, or an unregistered directory at the path, raises);
+- otherwise, when the requested branch is attached to a **different**
+  registered worktree (a **branch occupant**), the occupant is resolved
+  before any attach: a **live** occupant raises an error naming both the
+  occupant path and the target path, and the occupant is left untouched
+  (provision never removes another owner's worktree); a **stale** occupant
+  is pruned and resolution falls through; a stale occupant that survives
+  the prune (a locked worktree) raises — it is never unlocked or removed.
+  The occupant check SHALL precede the fast-forward fetch and the attach,
+  because git refuses both when the branch is checked out elsewhere;
 - otherwise, when the local branch exists and `ref` is its remote-tracking
   counterpart, the branch is **fast-forwarded-or-failed** via
   `git fetch <remote> <branch>:<branch>` — a no-op when current, a
@@ -373,6 +388,21 @@ converged loop is something the caller logs, not a failed run.
 
 - **WHEN** a worktree is registered at the derived path, its directory is gone, and the registration survives the prune (a locked worktree)
 - **THEN** provision raises and the locked registration is left for its owner to unlock
+
+#### Scenario: Branch held by a live worktree raises naming both paths
+
+- **WHEN** provision runs with a `branch` attached to a different registered worktree whose directory exists
+- **THEN** provision raises an error naming both the occupant path and the target path, and the occupant worktree is left untouched — never removed, switched, or forced
+
+#### Scenario: Branch held only by a stale registration is pruned and provisioned
+
+- **WHEN** provision runs with a `branch` attached to a different registration whose directory is gone (a stale branch occupant)
+- **THEN** provision prunes the stale registration and continues, re-creating the worktree at the target path from the surviving branch
+
+#### Scenario: Locked stale branch occupant raises
+
+- **WHEN** a `branch` is attached to a different registration whose directory is gone and whose registration survives the prune (a locked worktree)
+- **THEN** provision raises and the locked registration is left for its owner to unlock; provision never unlocks or removes it
 
 #### Scenario: Existing branch fast-forwards against its remote counterpart
 

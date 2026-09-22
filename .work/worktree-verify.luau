@@ -13,7 +13,15 @@
 -- next provision prunes the stale registration and re-creates the
 -- worktree at the same path from the surviving branch; plus the
 -- locked-stale case: a locked registration survives prune, so
--- provision raises instead of adopting the nonexistent path.
+-- provision raises instead of adopting the nonexistent path; plus the
+-- branch-occupant cases: a branch attached to a different registered
+-- worktree is resolved before any attach — a live occupant raises
+-- naming both the occupant and the target path and is left untouched;
+-- a stale occupant (directory deleted out-of-band, registration
+-- surviving) is pruned and the worktree is provisioned at the target
+-- path from the surviving branch; a locked stale occupant raises with
+-- the lock-aware wording and its registration survives, never
+-- unlocked or removed.
 --
 -- Everything runs against a throwaway local git setup (a bare `origin`,
 -- a `main` clone, an `updater` clone for advancing the remote), removed
@@ -300,6 +308,134 @@ local function runAll(base: string)
 		"the locked registration survives (provision never unlocks)"
 	)
 	ptah.log("ok: locked stale registration raises; registration left for its owner")
+
+	-- -----------------------------------------------------------------
+	-- Case: live branch occupant — the requested branch is attached to
+	-- a different registered worktree whose directory is present:
+	-- provision raises naming both paths, before any git command that
+	-- would refuse the occupied branch (the ref is the branch's
+	-- remote-tracking counterpart, so without the guard the
+	-- fast-forward fetch would be the first failure). The occupant
+	-- worktree is untouched.
+	-- -----------------------------------------------------------------
+	local occ = worktree.provision({
+		repo = MAIN,
+		name = "occ",
+		ref = "origin/main",
+		branch = "occ-1",
+		parent = WTS,
+	})
+	sh(`git -C {quote(occ.path)} commit --allow-empty -m "occupant work"`)
+	local occHead = sh(`git -C {quote(occ.path)} rev-parse HEAD`)
+	local occOk, occErr = pcall(function()
+		return worktree.provision({
+			repo = MAIN,
+			name = "occ-victim",
+			ref = "origin/occ-1",
+			branch = "occ-1",
+			parent = WTS,
+		})
+	end)
+	expect(occOk == false, `live-occupant provision raised (got {tostring(occErr)})`)
+	expect(
+		string.find(tostring(occErr), occ.path, 1, true) ~= nil,
+		`live-occupant error names the occupant path: {tostring(occErr)}`
+	)
+	expect(
+		string.find(tostring(occErr), `{WTS}/main-occ-victim`, 1, true) ~= nil,
+		`live-occupant error names the target path: {tostring(occErr)}`
+	)
+	expect(
+		string.find(sh(`git -C {quote(MAIN)} worktree list --porcelain`), occ.path, 1, true) ~= nil,
+		"the occupant worktree is still registered"
+	)
+	expect(sh(`git -C {quote(occ.path)} rev-parse HEAD`) == occHead, "the occupant's HEAD is unchanged")
+	expect(
+		string.find(sh(`git -C {quote(MAIN)} worktree list --porcelain`), `{WTS}/main-occ-victim`, 1, true) == nil,
+		"no worktree was registered at the target path by the failed provision"
+	)
+	ptah.log("ok: live branch occupant raises naming both paths; occupant untouched")
+
+	-- -----------------------------------------------------------------
+	-- Case: stale branch occupant — the occupant's directory is
+	-- deleted out-of-band while its registration survives (asserted
+	-- before the re-provision): the guard prunes the stale
+	-- registration and provision succeeds, attaching the fresh target
+	-- path to the surviving branch and its commit.
+	-- -----------------------------------------------------------------
+	local staleOcc = worktree.provision({
+		repo = MAIN,
+		name = "stale-occ",
+		ref = "origin/main",
+		branch = "stale-occ-1",
+		parent = WTS,
+	})
+	sh(`git -C {quote(staleOcc.path)} commit --allow-empty -m "stale occupant work"`)
+	local staleOccHead = sh(`git -C {quote(MAIN)} rev-parse stale-occ-1`)
+	sh(`rm -rf {quote(staleOcc.path)}`)
+	expect(
+		string.find(sh(`git -C {quote(MAIN)} worktree list --porcelain`), staleOcc.path, 1, true) ~= nil,
+		"the stale occupant's registration survived the out-of-band delete"
+	)
+	local healed = worktree.provision({
+		repo = MAIN,
+		name = "stale-victim",
+		ref = "origin/main",
+		branch = "stale-occ-1",
+		parent = WTS,
+	})
+	expect(healed.path == `{WTS}/main-stale-victim`, `stale-occupant heal targets the fresh path: {healed.path}`)
+	expect(healed.branch == "stale-occ-1", "healed provision returns the requested branch")
+	expect(
+		string.find(sh(`git -C {quote(MAIN)} worktree list --porcelain`), staleOcc.path, 1, true) == nil,
+		"the stale occupant's registration was retired by the prune"
+	)
+	expect(sh(`git -C {quote(healed.path)} rev-parse --abbrev-ref HEAD`) == "stale-occ-1", "healed worktree is on the requested branch")
+	expect(sh(`git -C {quote(healed.path)} rev-parse HEAD`) == staleOccHead, "healed worktree carries the surviving branch's commit")
+	ptah.log("ok: stale branch occupant pruned; worktree provisioned at the target from the surviving branch")
+
+	-- -----------------------------------------------------------------
+	-- Case: locked stale branch occupant — the occupant is locked and
+	-- its directory deleted: the prune skips it, so provision raises
+	-- with the lock-aware wording and the locked registration survives
+	-- (still listed, still locked — never unlocked, never removed).
+	-- -----------------------------------------------------------------
+	local lockedOcc = worktree.provision({
+		repo = MAIN,
+		name = "locked-occ",
+		ref = "origin/main",
+		branch = "locked-occ-1",
+		parent = WTS,
+	})
+	sh(`git -C {quote(MAIN)} worktree lock {quote(lockedOcc.path)}`)
+	sh(`rm -rf {quote(lockedOcc.path)}`)
+	local lockedOccOk, lockedOccErr = pcall(function()
+		return worktree.provision({
+			repo = MAIN,
+			name = "locked-occ-victim",
+			ref = "origin/main",
+			branch = "locked-occ-1",
+			parent = WTS,
+		})
+	end)
+	expect(lockedOccOk == false, `locked-stale-occupant provision raised (got {tostring(lockedOccErr)})`)
+	expect(
+		string.find(tostring(lockedOccErr), "locked", 1, true) ~= nil,
+		`locked-stale-occupant error carries the lock-aware wording: {tostring(lockedOccErr)}`
+	)
+	expect(
+		string.find(tostring(lockedOccErr), lockedOcc.path, 1, true) ~= nil,
+		`locked-stale-occupant error names the occupant path: {tostring(lockedOccErr)}`
+	)
+	expect(
+		string.find(sh(`git -C {quote(MAIN)} worktree list --porcelain`), lockedOcc.path, 1, true) ~= nil,
+		"the locked registration survives (never removed)"
+	)
+	expect(
+		sh(`git -C {quote(MAIN)} worktree lock {quote(lockedOcc.path)} 2>&1; echo $?`) ~= "0",
+		"the registration is still locked (re-locking fails as already locked; never unlocked)"
+	)
+	ptah.log("ok: locked stale branch occupant raises with the lock-aware wording; registration survives locked")
 	return nil
 end
 
