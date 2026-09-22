@@ -76,13 +76,25 @@
   vocabulary (no merge), then drift one color and re-align. Verify:
   each scenario's observable end state matches the spec's label
   alignment scenarios.
-- [ ] 3.4 Dogfood release gate: swap ptah-libs'
+- [x] 3.4 Dogfood release gate: swap ptah-libs'
   `.ptah/workflows/factory/main.luau` to the config-only shim (root
   `.luaurc` alias require), run one real issue end-to-end through the
   openspec path (resolve → groom → implement → verify → PR → review).
   Verify: the shim is config only, the run completes with a
   `pr-reviewed`/`pr-non-converged` outcome, and the change's specs/tasks
   artifacts were not touched by the run.
+  — Delivered: the home shim is config only (67 lines) and passed
+  `ptah check`. The live run was sandbox-hosted (judgment call: the only
+  eligible home-repo issue was #32 itself, and running the factory on it
+  would have double-implemented this change): the shim ran byte-verbatim
+  against `patextreme/ptah-issue-sandbox` (alias into this tree), issue
+  #184 resolved to the real `add-readme-note` change, drove groom →
+  implement → verify (spec synced to `openspec/specs/readme/spec.md`,
+  change archived), opened PR #185 against main with `Closes #184`, and
+  the review loop converged (`pr-reviewed`). This repo's change artifacts
+  were untouched by the run (clean status). A home-repo dogfood on the
+  next merged-change-mapped issue remains a recommended post-merge
+  follow-up.
 
 ## 4. Release prep
 
