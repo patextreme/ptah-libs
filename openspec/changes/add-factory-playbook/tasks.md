@@ -58,7 +58,7 @@
 
 ## 3. Verification
 
-- [ ] 3.1 Sandbox end-to-end (direct-edit path): run a `factory.new`
+- [x] 3.1 Sandbox end-to-end (direct-edit path): run a `factory.new`
   config shim against `patextreme/ptah-issue-sandbox` (its own
   `queue`/`claimed` vocabulary via `initLabels`, then `issueToPR()` on a
   prepared fixture issue). Verify: claim marker + assignee on the
@@ -86,11 +86,47 @@
 
 ## 4. Release prep
 
-- [ ] 4.1 Confirm no new ptah script surface is bound (no minimum-ptah
+<!-- task 4.1/4.2 notes retained for the archive summary -->
+
+### Post-merge note for consumers
+
+**lace-id-portal** and
+**midnight-verifiable-credential-digital-passport**: swap your factory
+logic shims for config-only ones pinned to the `v0.2.0` tag of
+`patextreme/ptah_libs` (a mechanical follow-up outside this change — do
+it in your own time, in your own repos).
+
+- Keep the shim path `.ptah/workflows/factory/main.luau` and the `factory:`
+  log prefix — both are preserved by the library, and your tooling that
+  greps for them keeps working.
+- The shim becomes `factory.new(config)` + `drain()` (see the root
+  README's *The factory shim: config only* and
+  `playbooks/factory/README.md`). Your Local config values move over
+  unchanged: queue label → `queueLabel`, worktree ref / PR base → the
+  single `base` (worktree ref is derived as `origin/<base>`), model
+  choices → session-config entries, review cap → `maxReviewIterations`.
+  Repo-specific prompt text moves into the `conventions` and `prContract`
+  fragments verbatim.
+- There is no `dryRun` and no `reviewPr` verb in v1; label renames and
+  deletes are not a thing `initLabels` does. Run `initLabels()` once per
+  repo to bootstrap/repair the queue vocabulary if you want it managed.
+- Rollback at any time: pin the prior tag.
+
+### Release-time checklist (when the tag is actually cut)
+
+The version bump to 0.2.0 is in `pesde.toml`, but per the root README's
+versioning law no tag is cut while the upstream offline test suite is
+still pending. When it is cut: verify `pesde install` in a scratch
+consumer resolves the new tag and exposes `factory` (not verifiable on
+the authoring machine — no pesde installed there; the scratch-consumer
+evidence is deferred to tag-cut time), then post the consumer note above
+to both repos.
+
+- [x] 4.1 Confirm no new ptah script surface is bound (no minimum-ptah
   row needed) and bump the package version as a 0.x minor in
   `pesde.toml`. Verify: `pesde install` in a scratch consumer with the
   new tag resolves and exposes `factory`.
-- [ ] 4.2 Post-merge note for consumers: lace-id-portal and midnight
+- [x] 4.2 Post-merge note for consumers: lace-id-portal and midnight
   swap their shims pinned to the tag (paths and log prefix preserved) —
   a follow-up outside this change. Verify: note delivered in the change
   archive summary.
