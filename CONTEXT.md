@@ -87,12 +87,37 @@ in Local config, or the playbook's built-in default. A long or repo-pinned
 one points at a versioned document rather than inlining text.
 _Avoid_: instruction document, review instruction, prompt
 
+**Review pass**:
+One discovery-or-delta cycle of review → typed judge → ledger write, ending
+in a PR review report — the atom of PR review. A standalone review runs
+exactly one pass, unconditionally, and never fixes; the review-fix loop
+composes passes with fix turns under its budget.
+_Avoid_: full review (discovery is full-PR, delta is not), re-review (what
+deleting the ledger produces)
+
+**Review-fix loop**:
+The convergent loop over review passes and fix turns — a batched fix only
+when open blocking findings remain and budget remains, every push followed
+by another pass, ending converged or at the cap.
+_Avoid_: review loop (the operation's former shape), fix loop (review
+issues the fixes; a fix never terminates the loop)
+
+**Ledger**:
+The durable machine-readable record of a PR's review state — findings with
+statuses, the discovery and last-reviewed SHAs, the PR's intention — kept
+in one in-place-edited PR comment; the PR review report is its readable
+view.
+_Avoid_: state (too generic), findings list (the ledger carries more than
+findings)
+
 **PR review report**:
-The human-facing summary of a whole PR review loop, posted as a marked PR
-comment (edited in place across runs) on every terminal outcome that returns.
-Authored by a dedicated reporter agent under a fixed section contract, with a
-deterministic status line prepended by the playbook from the ledger.
-_Avoid_: verdict comment (the retired name), summary comment, review summary
+The human-facing summary of a PR review operation — one review pass or a
+whole review-fix loop — posted as a marked PR comment on every terminal
+outcome that returns and edited in place: one ever-current report; the
+ledger carries the history. Authored by a dedicated reporter agent under a
+fixed section contract, with a deterministic status line prepended by the
+playbook from the ledger.
+_Avoid_: verdict comment (the retired name), summary comment
 
 **Queue label**:
 The repo-configured label that places an issue into the pickup queue — a
