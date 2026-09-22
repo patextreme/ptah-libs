@@ -305,8 +305,8 @@ local function runIssue(brief: Brief): nil
 	local prUrl = openPullRequest(brief, change, wt.path)
 	ptah.log(("factory: issue #%d pull request: %s"):format(brief.number, prUrl))
 
-	local prReview = reviewLoop:review(prUrl)
-	ptah.log(("factory: pr review loop %s: %s"):format(prReview.status, prReview.verdict))
+	local prReview = reviewLoop:reviewFixLoop(prUrl)
+	ptah.log(("factory: pr review-fix loop %s: %s"):format(prReview.status, prReview.verdict))
 
 	-- Teardown only on the success path: a failed issue (the pcall in the
 	-- loop) keeps its worktree as the audit trail, and the branch survives
