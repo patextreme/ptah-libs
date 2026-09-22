@@ -8,7 +8,7 @@ judge** converts that prose into structured findings reconciled with a
 persistent **ledger**. Neither operation **asks a human**: the pull request
 itself, reviewed by its human at merge time, is the human checkpoint.
 Extracted and generalized from identus-ws's pr-review-loop; the facade split
-is decided in [ADR 0006](../../docs/adr/0006-review-pass-vs-review-fix-loop.md).
+is decided in [ADR 0007](../../docs/adr/0007-review-pass-vs-review-fix-loop.md).
 
 **`review` — the pass.** Exactly one review pass: discovery (a full-PR
 review) when no ledger exists, a delta review otherwise — **unconditionally**:
@@ -366,7 +366,7 @@ calling `:review` still runs, and silently stops fixing.** The `review` verb
 now means exactly one review pass; a consumer that wanted the convergent loop
 must rename the call to `:reviewFixLoop`. Making `review` fix again is the
 bug, not the repair
-(see [ADR 0006](../../docs/adr/0006-review-pass-vs-review-fix-loop.md)).
+(see [ADR 0007](../../docs/adr/0007-review-pass-vs-review-fix-loop.md)).
 
 - **`review()` is repurposed** — one unconditional review pass (discovery
   when no ledger exists, a delta review otherwise), never fixing, committing,

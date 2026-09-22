@@ -21,9 +21,21 @@ _Avoid_: utils, lib, common
 **Playbook**:
 A reusable workflow capability that consumers compose and configure rather
 than fork, named for the entity it manages — an issue, a PR, an openspec
-change — with its operations as that entity's verbs.
+change, or a composition of them — with its operations as that entity's
+verbs.
 _Avoid_: Component (the unit's former name), template, plugin, module
 (module means any Luau file)
+
+**Factory (playbook)**:
+The composition playbook that drains a repository's labeled queue into
+reviewed pull requests: claim an eligible issue, provision its worktree,
+apply the mapped openspec change or edit directly, open the issue-linked
+PR, and run the convergent PR review loop on it. Composes the issue,
+openspec, and pr playbooks and constructs them internally — its Local
+config is the whole composition's, data only. The name is deliberately
+narrow.
+_Avoid_: software factory (banned as the library's name, not this
+playbook's), assembly line, pipeline
 
 **Convergence loop**:
 The core workflow pattern: prompt an agent, judge the result with a typed
@@ -65,6 +77,14 @@ _Avoid_: wrapper, bootstrap
 The data-only configuration table a consumer repo passes into a Playbook or
 stdlib call. Functions are not configuration.
 _Avoid_: settings, options file
+
+**Prompt fragment**:
+Repo-authored free text a playbook injects at a declared point of a
+library-owned prompt — a repository's conventions into its direct-edit
+prompt, its commit and PR contract into its delivery prompt. A fragment is
+Local config: content the library places, never logic the library calls.
+_Avoid_: prompt override (the prompt skeleton is never replaced), custom
+prompt
 
 **Task scope**:
 The per-call description of which tasks an implement run is responsible
@@ -124,6 +144,15 @@ The repo-configured label that places an issue into the pickup queue — a
 human's assertion that the issue is ready for development. The mechanism
 is the playbook's; the word is the repo's.
 _Avoid_: ai-r4d (one repo's instance), intake label, ready label
+
+**Label vocabulary**:
+The declared label set a repository aligns to: name, color, and
+description per label. Alignment is idempotent — create the missing,
+update the drifted, never delete the unlisted. The factory playbook ships
+a canonical default; a repository's own vocabulary replaces it wholesale,
+never merges.
+_Avoid_: label config (config is any data; the vocabulary is the label
+set), label sync (sync implies two-way)
 
 **Claim**:
 An agent's posted, persistent assertion that it has taken an issue for

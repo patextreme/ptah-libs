@@ -41,7 +41,7 @@ capability-named playbook.
 - Documentation follows: the library README's export/operation tables, the
   playbook README (operations, migration notes), and the already-landed
   `CONTEXT.md` glossary entries (*Review pass*, *Review-fix loop*,
-  *Ledger*) and `docs/adr/0006-review-pass-vs-review-fix-loop.md` on this
+  *Ledger*) and `docs/adr/0007-review-pass-vs-review-fix-loop.md` on this
   branch.
 
 ## Capabilities

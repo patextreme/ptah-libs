@@ -8,7 +8,7 @@ work session → judge → `applyFindings` → persist), fix turns, and the
 terminal `finish` (reporter + status line + post). The spec delta splits
 the contract into a "PR review pass" requirement and a "PR review-fix loop"
 requirement; operation semantics were settled in a grilling session and
-recorded in `docs/adr/0006-review-pass-vs-review-fix-loop.md` and the
+recorded in `docs/adr/0007-review-pass-vs-review-fix-loop.md` and the
 `CONTEXT.md` glossary (both already on this branch). See proposal.md for
 motivation.
 
@@ -79,7 +79,7 @@ motivation.
 ## Risks / Trade-offs
 
 - [Silent break: old shims calling `:review` still run but stop fixing] →
-  migration note leads the README's breaking-reshape section; ADR 0006
+  migration note leads the README's breaking-reshape section; ADR 0007
   records the trap ("making `review` fix again is the bug"); consumers pin
   the prior tag.
 - [Machinery drift between the two operations] → single extracted
@@ -88,9 +88,9 @@ motivation.
 - [Unconditional pass on an unchanged head wastes an agent pass] →
   accepted (the contract stays one sentence); ledger deletion is the
   documented re-review escape hatch.
-- [ADR 0006 numbering collides with the unlanded `0006` in the
-  `ptah-libs-issue-32` worktree] → whichever branch lands second renumbers
-  its file.
+- [ADR 0006 numbering collides with the `0006` in the landed
+  `add-factory-playbook` change] → resolved: that change landed first, so
+  this change renumbers its ADR to 0007.
 - [Spec consolidation drops a regression pin] → mitigated above; the
   removed scenarios' content is restated, not deleted.
 
@@ -105,4 +105,4 @@ motivation.
 
 None — the grilling session settled operation semantics, naming,
 breakage posture, config shape, report lifecycle, and concurrency wording
-(see issue #34 and ADR 0006).
+(see issue #34 and ADR 0007).

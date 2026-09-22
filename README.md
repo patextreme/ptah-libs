@@ -38,6 +38,8 @@ ops:groom("add-auth")
 -- also available:
 -- libs.pr.new({ ... })
 -- libs.issue.new({ queueLabel = "ready-for-dev", claimedLabel = "in-progress" })
+-- libs.factory.new({ queueLabel = "ai-r4d", base = "main" }):drain()
+-- libs.factory.initLabels()  -- agent-free label alignment
 -- libs.std.predicate.new({ ... })
 -- libs.std.gh.run({ ... })
 -- libs.std.daemon.run({ ... })
@@ -59,11 +61,51 @@ ops:groom("add-auth")
 | `openspec` | openspec change playbook (groom, implement, verify) |
 | `pr` | PR review playbook — `review` (one unconditional pass, never fixes) + `reviewFixLoop` (the convergent loop) over a typed judge + PR-comment ledger |
 | `issue` | agent-free issue pickup (queue-label scan + earliest-claim marker) |
+| `factory` | composition playbook (`issueToPR`, `drain`, and the module-level `initLabels` label alignment) — composes the issue, openspec, and pr playbooks and constructs them internally from its data-only config |
 
 Playbooks are constructed with `new(config)`; per-call data (a change name,
 a PR URL) is a method argument. See [The playbook
 contract](#the-playbook-contract), [Loop
 conventions](#loop-conventions), and [Session config](#session-config) below.
+
+A composition playbook constructs its composed playbook instances
+internally from its own data-only config: **config carries no playbook
+instances** — they are neither data nor ptah runtime handles. The
+factory's config is the whole composition flattened (agent handles,
+session configs per role, the queue vocabulary, `base`, prompt fragments,
+attempt bounds).
+
+### The factory shim: config only
+
+The factory drains a repository's labeled issue queue into reviewed pull
+requests — claim the oldest eligible issue, provision its `issue-<n>`
+worktree off `origin/<base>`, apply the mapped openspec change or edit
+directly, open the issue-linked PR (`Closes #<n>`), run the convergent
+review loop, tear down. A consumer shim is config only:
+
+```lua
+--!strict
+local libs = require("./luau_packages/ptah_libs")
+
+local factory = libs.factory.new({
+	agent = ptah.agent("pi"),
+	judgeAgent = ptah.agent("pi"),
+	reporterAgent = ptah.agent("pi"),
+	sessionConfig = { { id = "model", value = "pi/glm-5.3-flash" } },
+	queueLabel = "ai-r4d",  -- required, no default: the vocabulary is the repo's
+	base = "main",          -- required, no default: the delivery base is the repo's
+	conventions = "Read CONTEXT.md first; run the format and test commands before finishing.",
+	prContract = "Sign commits (DCO); keep Conventional Commits titles.",
+	maxReviewIterations = 10,
+})
+
+libs.factory.initLabels() -- optional, module-level: agent-free label alignment (bootstrap/drift repair)
+factory:drain()           -- loop issueToPR() until the queue holds no eligible issue
+```
+
+See `playbooks/factory/README.md` for the config surface, the outcome
+taxonomy, the laws (per-issue error boundary, teardown on the success
+path only, non-converged-as-hand-off), and the environment requirements.
 
 ## Versioning
 
@@ -152,6 +194,10 @@ conventions](#loop-conventions), and [Session config](#session-config) below.
   - `issue/` — agent-free pickup: scan a repo-configured queue label
     and claim the oldest eligible issue with an earliest-wins marker
     comment, returning a typed pickup brief.
+  - `factory/` — the composition playbook: drains the labeled issue
+    queue into reviewed pull requests by composing the issue, openspec,
+    and pr playbooks (constructed internally); ships the canonical
+    default label vocabulary and the agent-free `initLabels` alignment.
 - `pesde.toml` — package manifest (`luau` target, `lib = "lib.luau"`).
 - `CONTEXT.md` — the library's vocabulary.
 

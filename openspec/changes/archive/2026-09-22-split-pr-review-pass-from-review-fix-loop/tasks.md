@@ -14,7 +14,7 @@
 
 ## 3. Documentation
 
-- [x] 3.1 Update `playbooks/pr/README.md`: two operations, pass semantics (unconditional, never fixes), config knobs marked loop-only, pointer to ADR 0006, and a migration note leading with the silent-shrink warning (`:review` → `:reviewFixLoop` for loops; pin prior tag)
+- [x] 3.1 Update `playbooks/pr/README.md`: two operations, pass semantics (unconditional, never fixes), config knobs marked loop-only, pointer to ADR 0007, and a migration note leading with the silent-shrink warning (`:review` → `:reviewFixLoop` for loops; pin prior tag)
 - [x] 3.2 Update the library `README.md` and `playbooks/README.md` operation tables/facade lists; verify every `:review(` reference now names the right verb
 - [x] 3.3 Verify the playbook documentation states "one operation per PR at a time" (replacing "one loop per PR") and keeps the ledger/report/`gh` environment requirements
 
@@ -34,5 +34,5 @@
 
 ## 5. Delivery
 
-- [x] 5.1 Commit the change artifacts plus the already-staged `CONTEXT.md` glossary entries and `docs/adr/0006-review-pass-vs-review-fix-loop.md` on `issue-34`; verify `git status` is clean
+- [x] 5.1 Commit the change artifacts plus the already-staged `CONTEXT.md` glossary entries and `docs/adr/0007-review-pass-vs-review-fix-loop.md` on `issue-34`; verify `git status` is clean
 - [x] 5.2 Push `issue-34` to `origin` and confirm the branch tracks; reference issue #34 in the commit message

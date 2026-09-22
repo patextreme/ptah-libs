@@ -16,6 +16,7 @@ local worktree = require("./std/worktree")
 local openspec = require("./playbooks/openspec/playbook")
 local pr = require("./playbooks/pr/playbook")
 local issue = require("./playbooks/issue/playbook")
+local factory = require("./playbooks/factory/playbook")
 
 return {
 	std = {
@@ -29,4 +30,5 @@ return {
 	openspec = openspec,
 	pr = pr,
 	issue = issue,
+	factory = factory,
 }

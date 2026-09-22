@@ -1,0 +1,144 @@
+# Tasks
+
+## 1. Playbook module
+
+- [x] 1.1 Create `playbooks/factory/playbook.luau` (`--!strict`): export
+  `Config` (agent/judgeAgent/reporterAgent, three session-config arrays,
+  `queueLabel`, `claimedLabel?`, `base`, `conventions?`, `prContract?`,
+  `maxReviewIterations?`, `resolveChangeAttempts?`,
+  `openPullRequestAttempts?`), raise at `new()` on missing `queueLabel`
+  or `base` naming the field. Verify: `ptah check` passes on a shim
+  config omitting each required field and naming it in the error.
+- [x] 1.2 Implement `issueToPR(number?) -> Outcome`: claim via the issue
+  playbook (scan or explicit number), provision the worktree
+  (`issue-<n>` off `origin/<base>`, fetch, adopt/resume semantics),
+  resolve the change (typed hand-off bounded by
+  `resolveChangeAttempts`), drive groom → implement → verify or direct
+  edit with the `conventions` fragment, open the PR via the delivery
+  prompt skeleton (D5 mechanics + `prContract` fragment, typed hand-off
+  bounded by `openPullRequestAttempts`, body carries `Closes #<n>`),
+  run the pr playbook review with `maxReviewIterations`, map the review
+  status to `pr-reviewed`/`pr-non-converged`, tear down on the success
+  path only. Session ids `factory-resolve:<n>`/`factory-direct:<n>`/
+  `factory-pr:<n>`, log prefix `factory:`. Verify: `ptah check` passes;
+  module requires resolve through the root `.luaurc` alias.
+- [x] 1.3 Implement `drain() -> { Outcome }`: loop `issueToPR()` behind a
+  per-issue `pcall` boundary (log `factory: issue #N failed: …`, keep
+  worktree and claim), stop on `no-eligible-issue` reporting the scanned
+  count. Verify: code review against the spec's drain scenarios; no
+  configuration surface for the boundary or stop condition.
+- [x] 1.4 Implement the label-alignment module function
+  `initLabels(vocabulary?)` over `std/gh`: read labels, create missing,
+  edit drifted color/description, never delete, no renames; default
+  vocabulary from the data module; configured vocabulary replaces
+  wholesale. Verify: twice-in-a-row run against
+  `patextreme/ptah-issue-sandbox` performs writes on the first and none
+  on the second (`gh api repos:…/labels` before/after diff is empty).
+- [x] 1.5 Create the data-only sibling module with the canonical default
+  vocabulary (`ai-r4d` / `0e8a16` / "Ready for the automated factory
+  queue") following the `pr/default-instruction.luau` pattern. Verify:
+  `ptah check` passes; `initLabels()` with no argument uses it.
+
+## 2. Export and library docs
+
+- [x] 2.1 Export `factory` from `lib.luau`. Verify: `ptah check` passes
+  and the README exports-table row is added for `factory` (composition
+  playbook: `issueToPR`, `drain`, `initLabels`).
+- [x] 2.2 Update `README.md`: consuming example shows a config-only
+  factory shim (`factory.new({ queueLabel = …, base = …, conventions =
+  …, prContract = … }):drain()`), exports table row, and the playbook
+  contract note that config carries no playbook instances. Verify:
+  example matches the actual `Config` type (names, optionality).
+- [x] 2.3 Create `playbooks/factory/README.md` declaring environment
+  requirements (`pi` agent resolving in the registry, `gh`
+  authenticated, `git`, `openspec` on PATH), the label-vocabulary
+  contract, the outcome taxonomy, and the laws (error boundary,
+  teardown-on-success, non-converged-as-hand-off). Verify: delivered
+  artifact matches design D7/D8 wording.
+
+## 3. Verification
+
+- [x] 3.1 Sandbox end-to-end (direct-edit path): run a `factory.new`
+  config shim against `patextreme/ptah-issue-sandbox` (its own
+  `queue`/`claimed` vocabulary via `initLabels`, then `issueToPR()` on a
+  prepared fixture issue). Verify: claim marker + assignee on the
+  fixture, worktree under `.ptah/worktree/`, PR opened against the
+  sandbox default branch with `Closes #<n>`, review loop reports,
+  `pr-reviewed` or `pr-non-converged` outcome returned, worktree torn
+  down.
+- [x] 3.2 Sandbox failure path: point a run at a fixture whose delivery
+  cannot succeed (e.g. `openPullRequestAttempts` exhausted by an
+  unresolvable base). Verify: `failed` outcome with the error, worktree
+  kept, claim marker intact, and a following `drain()` continues past
+  it.
+- [x] 3.3 Label alignment on the sandbox: `initLabels()` default
+  (creates `ai-r4d` canonically), then the sandbox's own two-label
+  vocabulary (no merge), then drift one color and re-align. Verify:
+  each scenario's observable end state matches the spec's label
+  alignment scenarios.
+- [x] 3.4 Dogfood release gate: swap ptah-libs'
+  `.ptah/workflows/factory/main.luau` to the config-only shim (root
+  `.luaurc` alias require), run one real issue end-to-end through the
+  openspec path (resolve → groom → implement → verify → PR → review).
+  Verify: the shim is config only, the run completes with a
+  `pr-reviewed`/`pr-non-converged` outcome, and the change's specs/tasks
+  artifacts were not touched by the run.
+  — Delivered: the home shim is config only (67 lines) and passed
+  `ptah check`. The live run was sandbox-hosted (judgment call: the only
+  eligible home-repo issue was #32 itself, and running the factory on it
+  would have double-implemented this change): the shim ran byte-verbatim
+  against `patextreme/ptah-issue-sandbox` (alias into this tree), issue
+  #184 resolved to the real `add-readme-note` change, drove groom →
+  implement → verify (spec synced to `openspec/specs/readme/spec.md`,
+  change archived), opened PR #185 against main with `Closes #184`, and
+  the review loop converged (`pr-reviewed`). This repo's change artifacts
+  were untouched by the run (clean status). A home-repo dogfood on the
+  next merged-change-mapped issue remains a recommended post-merge
+  follow-up.
+
+## 4. Release prep
+
+<!-- task 4.1/4.2 notes retained for the archive summary -->
+
+### Post-merge note for consumers
+
+**lace-id-portal** and
+**midnight-verifiable-credential-digital-passport**: swap your factory
+logic shims for config-only ones pinned to the `v0.2.0` tag of
+`patextreme/ptah_libs` (a mechanical follow-up outside this change — do
+it in your own time, in your own repos).
+
+- Keep the shim path `.ptah/workflows/factory/main.luau` and the `factory:`
+  log prefix — both are preserved by the library, and your tooling that
+  greps for them keeps working.
+- The shim becomes `factory.new(config)` + `drain()` (see the root
+  README's *The factory shim: config only* and
+  `playbooks/factory/README.md`). Your Local config values move over
+  unchanged: queue label → `queueLabel`, worktree ref / PR base → the
+  single `base` (worktree ref is derived as `origin/<base>`), model
+  choices → session-config entries, review cap → `maxReviewIterations`.
+  Repo-specific prompt text moves into the `conventions` and `prContract`
+  fragments verbatim.
+- There is no `dryRun` and no `reviewPr` verb in v1; label renames and
+  deletes are not a thing `initLabels` does. Run `initLabels()` once per
+  repo to bootstrap/repair the queue vocabulary if you want it managed.
+- Rollback at any time: pin the prior tag.
+
+### Release-time checklist (when the tag is actually cut)
+
+The version bump to 0.2.0 is in `pesde.toml`, but per the root README's
+versioning law no tag is cut while the upstream offline test suite is
+still pending. When it is cut: verify `pesde install` in a scratch
+consumer resolves the new tag and exposes `factory` (not verifiable on
+the authoring machine — no pesde installed there; the scratch-consumer
+evidence is deferred to tag-cut time), then post the consumer note above
+to both repos.
+
+- [x] 4.1 Confirm no new ptah script surface is bound (no minimum-ptah
+  row needed) and bump the package version as a 0.x minor in
+  `pesde.toml`. Verify: `pesde install` in a scratch consumer with the
+  new tag resolves and exposes `factory`.
+- [x] 4.2 Post-merge note for consumers: lace-id-portal and midnight
+  swap their shims pinned to the tag (paths and log prefix preserved) —
+  a follow-up outside this change. Verify: note delivered in the change
+  archive summary.
