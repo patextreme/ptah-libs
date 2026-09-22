@@ -110,21 +110,24 @@ keep its worktree as the audit trail and stay claimed.
 
 The factory SHALL provide `drain()`: repeat the issue-to-PR operation in
 scan mode until the queue holds no eligible issue, returning the
-collected outcomes. Each issue SHALL run behind a per-issue error
+collected per-issue outcomes with the terminal no-eligible-issue outcome
+as the last element. Each issue SHALL run behind a per-issue error
 boundary — a failed issue is logged with its failure message and the loop
 continues to the next eligible issue — and the stop condition SHALL be
 the issue pickup's no-eligible-issue outcome, reported with the scan's
-count of eligible issues examined.
+count of eligible issues examined. A failure of the claim phase itself
+(a transport error, no issue involved) SHALL abort the drain instead of
+re-entering a broken scan.
 
 #### Scenario: Drains until the queue is empty
 
 - **WHEN** `drain()` runs against a queue holding three eligible issues and no more arrive
-- **THEN** three end-to-end runs happen and the returned outcome list carries three entries
+- **THEN** three end-to-end runs happen and the returned outcome list carries the three issue outcomes followed by the terminal no-eligible-issue outcome
 
 #### Scenario: One failure does not stop the drain
 
 - **WHEN** the second of four eligible issues fails mid-run
-- **THEN** the failure is logged with the issue number, the remaining two issues are still worked, and all four outcomes appear in the returned list
+- **THEN** the failure is logged with the issue number, the remaining two issues are still worked, and all four issue outcomes appear in the returned list followed by the terminal no-eligible-issue outcome
 
 #### Scenario: Empty queue stops the loop
 

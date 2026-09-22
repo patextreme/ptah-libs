@@ -99,8 +99,8 @@ local factory = libs.factory.new({
 	maxReviewIterations = 10,
 })
 
-factory:initLabels() -- optional: agent-free label alignment (bootstrap/drift repair)
-factory:drain()      -- loop issueToPR() until the queue holds no eligible issue
+libs.factory.initLabels() -- optional, module-level: agent-free label alignment (bootstrap/drift repair)
+factory:drain()           -- loop issueToPR() until the queue holds no eligible issue
 ```
 
 See `playbooks/factory/README.md` for the config surface, the outcome
