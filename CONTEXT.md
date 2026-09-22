@@ -36,7 +36,7 @@ _Avoid_: review loop, retry loop (those name specific uses of the pattern)
 The routing decision a convergence loop makes when a judged pass hits an
 operator-owned decision: an ask — pause, surface the blocker, resume
 with the human's answer — when a human channel serves it; a hard fail
-otherwise. A recoverable choice never escalates. The pr review loop
+otherwise. A recoverable choice never escalates. The pr playbook
 never escalates — the PR itself is its human checkpoint.
 _Avoid_: abort (that names the human refusing an ask, not the routing),
 fallback (escalation is a routing decision, not a degradation)

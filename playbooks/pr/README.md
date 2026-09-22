@@ -1,21 +1,34 @@
 # pr playbook
 
-Run a convergent review→validate→fix→verify loop against a pull request:
-an agent reviews the PR freely in prose following a reviewer persona, a
-**typed judge** converts that prose into structured findings and reconciles
-them with a persistent **ledger**, and the loop converges, fixes and pushes,
-or ends at its cap — then reviews the delta. The loop **never asks a human**:
-the pull request itself, reviewed by its human at merge time, is the loop's
-human checkpoint. Extracted and generalized from identus-ws's pr-review-loop.
+Two operations over one shared review-pass atom, against a pull request:
+`review` runs **exactly one review pass** and never fixes; `reviewFixLoop`
+runs the convergent review→validate→fix→verify loop. In both, an agent
+reviews the PR freely in prose following a reviewer persona and a **typed
+judge** converts that prose into structured findings reconciled with a
+persistent **ledger**. Neither operation **asks a human**: the pull request
+itself, reviewed by its human at merge time, is the human checkpoint.
+Extracted and generalized from identus-ws's pr-review-loop; the facade split
+is decided in [ADR 0006](../../docs/adr/0006-review-pass-vs-review-fix-loop.md).
 
-The loop is *convergent*, not symmetric: the first pass reviews the whole PR
-(discovery); every later pass reviews only the changes since the ledger's
-last-reviewed commit; convergence is computed from typed data
-(`no open blocking findings`), never parsed from prose; and a fix is issued
-only when budget remains, so **every push is followed by at least one review
-pass** — the loop cannot exit having just mutated the PR.
+**`review` — the pass.** Exactly one review pass: discovery (a full-PR
+review) when no ledger exists, a delta review otherwise — **unconditionally**:
+no ledger state gates or skips it (a pass against an already-reviewed head
+still runs; deleting the ledger is the documented re-review escape hatch).
+The pass never fixes, commits, or pushes: it persists the ledger, posts the
+report, and returns its outcome. A CI-triggered single review, or a
+read-the-report-first workflow, is what this verb is for.
+
+**`reviewFixLoop` — the loop.** The loop is *convergent*, not symmetric: the
+first pass reviews the whole PR (discovery); every later pass reviews only
+the changes since the ledger's last-reviewed commit; convergence is computed
+from typed data (`no open blocking findings`), never parsed from prose; and a
+fix is issued only when budget remains, so **every push is followed by at
+least one review pass** — the loop cannot exit having just mutated the PR.
 
 ## Phase shape
+
+Both operations run the same pass shape; the loop composes it with fix turns
+and a budget:
 
 - **Discovery** — a PR with no ledger gets one full-PR review. Its result
   creates the ledger with the discovery SHA, the PR's intention, and the
@@ -48,8 +61,9 @@ pass** — the loop cannot exit having just mutated the PR.
 
 ## The instruction contract (three layers)
 
-The playbook's instruction contract has three layers, so the loop's structure
-never depends on the quality or format of a repo-authored instruction:
+The playbook's instruction contract has three layers, so either operation's
+structure never depends on the quality or format of a repo-authored
+instruction:
 
 1. **Persona** — `reviewInstruction`, repo-authored. A configured value is a
    **full replacement** of the built-in default persona (only a nil value
@@ -69,10 +83,10 @@ never depends on the quality or format of a repo-authored instruction:
 
 Verdicts that do not reduce to a blocking/non-blocking classification — score
 gates, approve/request-changes votes, report-only reviews — are a **different
-playbook**, not an instruction swap: loop shape is playbook policy.
+playbook**, not an instruction swap: operation shape is playbook policy.
 Deterministic signals (CI checks, configured gates) are **outside** the
 playbook — they belong to the calling script, which composes them around
-`review()`.
+either operation.
 
 ## The built-in default
 
@@ -102,7 +116,7 @@ longer instructions.
 
 ## The ledger
 
-The loop's state lives in a **dedicated PR comment** marked
+The playbook's state lives in a **dedicated PR comment** marked
 `<!-- ptah:pr-review-ledger -->`, updated in place through the `gh` transport.
 It carries the PR identity, the discovery SHA and the `lastReviewedSha`, the
 PR's intention, the findings (id, one-line title, family, severity, validation
@@ -110,11 +124,14 @@ status, the judge's `needsHuman` determination, status
 `open`/`fixed`/`deferred`/`accepted`, fixing commit), the family table, and
 the resolved count.
 
-- **Auto-resume, no flag.** A fresh `review()` against a PR whose ledger
-  comment exists resumes from it: open blocking findings drive a fix turn;
-  a clean ledger at the current head converges immediately. A finding
+- **Auto-resume, no flag.** A fresh `reviewFixLoop()` against a PR whose
+  ledger comment exists resumes from it: open blocking findings drive a fix
+  turn; a clean ledger at the current head converges immediately. A finding
   carrying `needsHuman` drives the fix turn like any other open blocking
-  finding — the flag is the reviewer's pointer, not a gate.
+  finding — the flag is the reviewer's pointer, not a gate. The `review`
+  operation takes no resume path at all: it runs its single pass
+  unconditionally — discovery when no ledger exists, a delta review
+  otherwise — regardless of ledger state.
 - **`needsHuman`.** Each finding carries the judge's latest
   `needsHuman` determination: recorded when the finding is filed, updated
   when a later reconciliation revisits it, and never cleared — there is no
@@ -135,9 +152,10 @@ the resolved count.
 - **Playbook-owned.** The ledger is the playbook's data. Hand-editing it is
   unsupported, and a deleted ledger degrades a fresh run to a new discovery
   pass (today's per-run behavior) rather than being defended against.
-- **One loop per PR.** Two concurrent loops on one PR corrupt the in-place
-  comment update; one loop per PR is an environment requirement, not a
-  locked invariant.
+- **One operation per PR.** Two concurrent operations on one PR corrupt the
+  in-place comment update; one operation per PR at a time is an environment
+  requirement, not a locked invariant — a lone `review` pass corrupts
+  in-place comment writes exactly like a loop.
 
 The PR's intention is captured at discovery from the PR title and body; when
 the body is absent it falls back to the last commit message before the first
@@ -146,11 +164,12 @@ re-fetches it.
 
 ## The PR review report
 
-Every terminal outcome that *returns* — converged, or non-converged at the cap
-— produces a **PR review report**: a human-facing summary of the whole loop,
-posted as a dedicated PR comment marked `<!-- ptah:pr-review-report -->` and
-**edited in place** across runs (the same marker-and-edit lifecycle as the
-ledger, so a re-run edits rather than appends). A run that *fails* —
+Every terminal outcome that *returns* — from either operation, converged or
+non-converged — produces a **PR review report**: a human-facing summary of
+the PR review operation (one review pass or a whole loop), posted as a
+dedicated PR comment marked `<!-- ptah:pr-review-report -->` and **edited in
+place** across runs (the same marker-and-edit lifecycle as the ledger, so a
+re-run of either operation edits rather than appends). A run that *fails* —
 reporter exhaustion — raises and posts no report.
 
 The report is authored by a dedicated **reporter agent** (`reporterAgent`,
@@ -170,8 +189,9 @@ a fixed section contract:
   recent with an "…and N earlier omitted" note (the ledger retains every
   entry).
 - *Open non-blocking*, *Deferred*, *Accepted* — one line per finding.
-- *Loop summary* — iterations, the discovery and last-reviewed commits, and
-  the family table.
+- *Review summary* — the pass count (1 for a lone `review` pass; the loop's
+  completed units for `reviewFixLoop`), the discovery and last-reviewed
+  commits, and the family table.
 - *Open blocking* — for a non-converged outcome only, leading the body.
 
 The reporter session receives the full ledger (every status group, including
@@ -179,9 +199,12 @@ retained `fixed` entries), the terminal status, and the section contract, plus
 the last review pass's prose when the current operation ran one. A resume that
 converges immediately, or that ends at the cap without a new review pass, has
 no prose, so the prompt carries an explicit no-prose marker and the report is
-rendered from the ledger alone. `outcome.report` carries the posted text
+rendered from the ledger alone; a `review` pass always runs, so its report
+always carries the prose. `outcome.report` carries the posted text
 (status line plus body), so a caller can display the report without re-reading
-the PR; `outcome.verdict` keeps its meaning (the final review verdict text).
+the PR; `outcome.verdict` is the pass prose for `review` (the pass always
+runs) and the final verdict text for `reviewFixLoop` (empty only on the
+resume fast paths that run no pass).
 
 ## Environment requirements (declared, not bundled)
 
@@ -197,19 +220,23 @@ the PR; `outcome.verdict` keeps its meaning (the final review verdict text).
   prompt; it authors the PR review report body. A weak model is adequate:
   the report is a rendering of typed ledger data plus the deterministic
   status line.
-- **One loop per PR** — see [The ledger](#the-ledger).
+- **One operation per PR** — one operation (a lone `review` pass or a whole
+  `reviewFixLoop`) per PR at a time; see [The ledger](#the-ledger).
 - **No CI or gate reading** — the playbook never reads check results or
   executes gate commands; that is the calling script's job.
 
 ## Coverage contract
 
 This library ships no test suite: the ptah repository's offline suite owns
-updated coverage for this playbook's retired ask path (no ask is raised;
-flagged findings drive fix turns like any other blocking finding).
+updated coverage for this playbook — the pass entry point (`review` as one
+unconditional pass that never fixes), the loop's byte-stable sequence through
+the shared pass primitive, and the consolidated ask-retirement pins (no ask
+is raised; flagged findings drive fix turns like any other blocking
+finding).
 
 ## needsHuman is report-only (the PR is the human checkpoint)
 
-The loop never asks a human at any point, and ask-provider availability is
+Neither operation asks a human at any point, and ask-provider availability is
 irrelevant — a provider-less environment behaves identically to a served one.
 The judge's `needsHuman` flag is **report-only**: the judge sets it only on an
 open blocking finding that rests on an operator-owned decision — one the agent
@@ -235,7 +262,7 @@ part in this playbook.
 ```lua
 local pr = require("./luau_packages/ptah_libs").pr
 
-local loop = pr.new({
+local ops = pr.new({
 	agent = ptah.agent("claude"),         -- work agent handle
 	judgeAgent = ptah.agent("claude"),    -- required judge agent handle
 	reporterAgent = ptah.agent("claude"), -- required reporter agent handle
@@ -261,8 +288,10 @@ local loop = pr.new({
 	-- optional: the taxonomy layer — free text supplied to the judge
 	-- defining what counts as blocking for this repository.
 	-- blockingAdditions = "Only regressions introduced by this PR count as blocking.",
-	dryRun = false,                      -- optional: never push (default false)
-	maxIterations = 8,                   -- optional: cap (default 8)
+	dryRun = false,                      -- reviewFixLoop only: never push
+	                                     -- (default false; inert for review)
+	maxIterations = 8,                   -- reviewFixLoop only: cap
+	                                     -- (default 8; inert for review)
 })
 ```
 
@@ -285,35 +314,71 @@ field is just a directory, and pointing it at one produced by
 `std.worktree` (or a plain clone) is the calling shim's business. Pass an
 absolute path; a relative one is not resolved by the playbook.
 
-`judgeAgent` is **required and load-bearing**: the loop's convergence is
-computed from the judge's typed output, and there is no prose-parsing
-fallback. A judge that never submits a typed result is retried a bounded
-number of times; exhaustion fails the iteration (never a silent converge, no
-fix prompt issued).
+`judgeAgent` is **required and load-bearing**: the outcome status of either
+operation is computed from the judge's typed output, and there is no
+prose-parsing fallback. A judge that never submits a typed result is retried
+a bounded number of times; exhaustion fails the operation (never a silent
+converge, no fix prompt issued).
 
 ## Operations
 
-- `loop:review(prUrl)` — run the loop against one pull request; the PR URL is
-  per-call data and the sole repository context. Returns a **typed outcome**:
+- `ops:review(prUrl)` — run **exactly one review pass** against one pull
+  request; the PR URL is per-call data and the sole repository context.
+  Unconditional: discovery when no ledger exists, a delta review otherwise;
+  no ledger state gates or skips it. Never fixes, commits, or pushes. Returns
+  a **typed outcome**:
 
   ```lua
-  { status = "converged" | "non-converged", verdict = "<final verdict text>", ledger = { ... }, report = "<posted report text>" }
+  { status = "converged" | "non-converged", verdict = "<pass prose>", ledger = { ... }, report = "<posted report text>" }
   ```
 
-  Outcomes as data, so the caller's script can gate its own post-loop steps
-  (CI, gates) on the loop's end state. `report` is the exact text posted as
-  the PR review report (status line plus body). The returned status is always
-  `converged` or `non-converged` — the loop never asks, so no escalation
-  failure exists, and reporter exhaustion is the only failure that raises.
+  `verdict` is always the pass prose; `status` is `converged` when no open
+  blocking findings remain after the pass, `non-converged` otherwise. The
+  report posts on every return.
+- `ops:reviewFixLoop(prUrl)` — run the convergent review→fix loop: passes
+  composed with batched fix turns under `maxIterations`, resuming from an
+  existing ledger automatically, never asking. Same outcome shape;
+  `verdict` is the final verdict text (empty only on the resume fast paths
+  that run no pass).
 
-With `dryRun = true` the commit-and-push step is skipped entirely: the loop
-still reviews, judges, and fixes, but never pushes to the PR branch — a gate
-for rehearsing persona changes against a real reviewer without pushing. The
-report is still posted: dry-run gates the branch, not the PR conversation.
+  Outcomes as data, so the caller's script can gate its own post-operation
+  steps (CI, gates) on the operation's end state. `report` is the exact text
+  posted as the PR review report (status line plus body). The returned
+  status is always `converged` or `non-converged` — neither operation asks,
+  so no escalation failure exists, and reporter exhaustion is the only
+  failure that raises.
 
-The playbook ships facade-only (`:review`). A `run()` daemon convenience
-(looping over open PRs) was deliberately deferred: it is sugar over
-`std.daemon` + `:review` and can be added without breaking the facade.
+With `dryRun = true` the loop's commit-and-push step is skipped entirely: the
+loop still reviews, judges, and fixes, but never pushes to the PR branch — a
+gate for rehearsing persona changes against a real reviewer without pushing.
+The report is still posted: dry-run gates the branch, not the PR conversation.
+The knob is loop-only — inert for `review`, which never pushes.
+
+The playbook ships facade-only (`:review`, `:reviewFixLoop`). A `run()` daemon
+convenience (looping over open PRs) was deliberately deferred: it is sugar
+over `std.daemon` + `:reviewFixLoop` and can be added without breaking the
+facade.
+
+## Migration notes (the facade split: pass vs loop)
+
+This is a breaking reshape. **Lead warning — the silent shrink: an old shim
+calling `:review` still runs, and silently stops fixing.** The `review` verb
+now means exactly one review pass; a consumer that wanted the convergent loop
+must rename the call to `:reviewFixLoop`. Making `review` fix again is the
+bug, not the repair
+(see [ADR 0006](../../docs/adr/0006-review-pass-vs-review-fix-loop.md)).
+
+- **`review()` is repurposed** — one unconditional review pass (discovery
+  when no ledger exists, a delta review otherwise), never fixing, committing,
+  or pushing, reporting on every call. Consumers running loops: rename
+  `:review(prUrl)` → `:reviewFixLoop(prUrl)`.
+- **No alias, no flag** — the clean break is the repo's ritual; pin the prior
+  tag to defer (rollback is the same pin).
+- **Loop behavior is unchanged except the report's summary section** —
+  "Loop summary" is renamed "Review summary" and carries a pass count
+  instead of the iteration count; resume fast paths, fix turns, the budget
+  rule, and never-ask behavior are byte-stable.
+- **`dryRun` and `maxIterations` are loop-only** — inert for `review`.
 
 ## Migration notes (identus-ws lineage)
 
