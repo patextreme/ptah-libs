@@ -8,14 +8,22 @@
 -- directory a `git clean -ffdx` or a manual `rm` deleted) and
 -- re-creates the worktree — or raises when the registration survives
 -- the prune (a locked worktree; unlocking is never provision's act) —
--- fast-forwards-or-fails an existing branch against its remote
--- counterpart, and never resets or renames;
--- `teardown` refuses a dirty worktree by default and never touches
--- branches (unpushed commits survive on the local branch). One path
--- identity rules a provision run: an explicit relative parent resolves
--- from the selected repository root, the target collapses to its
--- canonical physical absolute path before any lookup or mutation, and
--- after creation git's registered path is authoritative.
+-- resolves a requested branch already held by another registration
+-- (a live occupant raises naming both paths and is left untouched;
+-- a stale occupant is pruned and provisioned; a locked stale occupant
+-- raises, never unlocked or removed), fast-forwards-or-fails an
+-- existing branch against its remote counterpart, and never resets or
+-- renames; `teardown` refuses a dirty worktree by default and never
+-- touches branches (unpushed commits survive on the local branch).
+-- One path identity rules a provision run: an explicit relative
+-- parent resolves from the selected repository root, the target
+-- collapses to its canonical physical absolute path before any lookup
+-- or mutation, and after creation git's registered path is
+-- authoritative. The one deliberate widening: the stale-registration
+-- self-heal covers the registration that holds the requested branch,
+-- not only the target path, and `git worktree prune` is global, so
+-- resolving it may retire another path's stale registration (dead
+-- state no owner can use; git offers no path-scoped prune).
 --
 -- Worktrees default under the repository's own `.ptah/worktree/` — one
 -- conventional home for everything ptah-owned in a consumer repo. A
@@ -205,6 +213,21 @@ local function branchExists(root: string, branch: string): boolean
 	return execGit(root, { "show-ref", "--verify", "--quiet", `refs/heads/{branch}` }).exitCode == 0
 end
 
+-- The worktree registration currently attached to `branch`, from the
+-- already-parsed inventory (`branches` maps path -> branch); nil when
+-- no registration holds it. A pure lookup over the parsed association
+-- — no git call — so the caller can re-run it against a re-read
+-- inventory after a prune. Git ties a branch to at most one
+-- registration, so the scan finds at most one occupant.
+local function branchOccupant(registered: { paths: { [string]: boolean }, branches: { [string]: string } }, branch: string): string?
+	for occupant, held in pairs(registered.branches) do
+		if held == branch then
+			return occupant
+		end
+	end
+	return nil
+end
+
 local function pathExists(path: string): boolean
 	return ptah.exec("test -e " .. quote(path)).exitCode == 0
 end
@@ -317,6 +340,26 @@ local function provision(options: ProvisionOptions): Worktree
 
 	if pathExists(path) then
 		error(`worktree: {path} exists but is not a registered worktree; refusing to touch it`)
+	end
+
+	-- Branch-occupant resolution, ahead of every command git refuses
+	-- for an occupied branch (the fast-forward fetch as well as the
+	-- attach). A live occupant is another owner's worktree: raise
+	-- naming both paths, touch nothing. A stale occupant (its
+	-- directory is gone, the registration survived) self-heals through
+	-- the same global prune the stale-target case uses; a survivor is
+	-- a locked registration and raises — never unlocked, never removed.
+	local occupant = branchOccupant(registered, branch)
+	if occupant ~= nil and not pathExists(occupant) then
+		git(root, { "worktree", "prune" })
+		registered = registeredWorktrees(root)
+		occupant = branchOccupant(registered, branch)
+	end
+	if occupant ~= nil then
+		if pathExists(occupant) then
+			error(`worktree: branch {branch} is already checked out at {occupant}; remove that worktree before provisioning {path}`)
+		end
+		error(`worktree: branch {branch} is held by a stale registration at {occupant} whose directory is gone and the registration survived prune (a locked worktree?); unlock it or run git worktree prune by hand`)
 	end
 
 	if branchExists(root, branch) then

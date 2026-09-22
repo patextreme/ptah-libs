@@ -12,9 +12,15 @@ repo. See `../README.md` for the library contract and consumption model.
 - `escalate.luau` — best-effort escalation transport over ptah's ask
   facility (outcomes as data; no ask ever raises)
 - `worktree.luau` — git worktree lifecycle over `ptah.exec`: `provision`
-  (adopt as-is / prune a stale registration and re-create /
-  fast-forward-or-fail / create; never reset) and `teardown`
-  (refuse-dirty, never branches); an explicit relative `parent`
+  (adopt as-is / prune a stale registration and re-create / resolve a
+  branch held by another registration / fast-forward-or-fail / create;
+  never reset) and `teardown` (refuse-dirty, never branches); a branch
+  already checked out in a different registered worktree is resolved
+  before any attach — a live occupant raises naming both the occupant
+  and the target path (the occupant is left untouched), a stale
+  occupant (its directory is gone) self-heals through the global
+  prune, and a locked stale occupant raises (never unlocked or
+  removed); an explicit relative `parent`
   resolves from the selected repository root and provision returns
   git's canonical physical absolute path. Worktrees default under
   `<repo-root>/.ptah/worktree/` (pass `parent` to place them elsewhere,
