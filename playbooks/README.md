@@ -17,6 +17,10 @@ module's internal `../../std/…` requires identically. See
 - `pr/` — convergent review→validate→fix→verify loop on a pull request
 - `issue/` — agent-free issue pickup: scan a queue label and claim the
   oldest eligible issue (earliest-claim marker protocol)
+- `factory/` — the composition playbook: drains the labeled issue queue
+  into reviewed pull requests, composing the three playbooks above
+  (constructed internally from its data-only config; ships the agent-free
+  `initLabels` label alignment and the canonical default vocabulary)
 
 Both convergence-loop playbooks share one escalation bar: an ask is
 justified only by an operator-owned decision — one the agent has no

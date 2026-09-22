@@ -1,5 +1,5 @@
 name = "patextreme/ptah_libs"
-version = "0.1.0"
+version = "0.2.0"
 description = "Ptah Playbooks: the shared Luau workflow library (stdlib helpers + workflow playbooks) for ptah consumers, taken as a pesde git dependency."
 license = "MIT"
 repository = "https://github.com/patextreme/ptah-libs"
