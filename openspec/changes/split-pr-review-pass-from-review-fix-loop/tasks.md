@@ -34,5 +34,5 @@
 
 ## 5. Delivery
 
-- [ ] 5.1 Commit the change artifacts plus the already-staged `CONTEXT.md` glossary entries and `docs/adr/0006-review-pass-vs-review-fix-loop.md` on `issue-34`; verify `git status` is clean
-- [ ] 5.2 Push `issue-34` to `origin` and confirm the branch tracks; reference issue #34 in the commit message
+- [x] 5.1 Commit the change artifacts plus the already-staged `CONTEXT.md` glossary entries and `docs/adr/0006-review-pass-vs-review-fix-loop.md` on `issue-34`; verify `git status` is clean
+- [x] 5.2 Push `issue-34` to `origin` and confirm the branch tracks; reference issue #34 in the commit message
