@@ -539,8 +539,8 @@ function M.new(config: Config): Instance
 		local prUrl = openPullRequest(brief, change, wt.path)
 		ptah.log(`{ERROR_PREFIX}: issue #{number} pull request: {prUrl}`)
 
-		local review = reviewLoop:review(prUrl)
-		ptah.log(`{ERROR_PREFIX}: issue #{number} pr review loop {review.status}: {review.verdict}`)
+		local review = reviewLoop:reviewFixLoop(prUrl)
+		ptah.log(`{ERROR_PREFIX}: issue #{number} pr review-fix loop {review.status}: {review.verdict}`)
 
 		-- Teardown is best-effort on the success path: a dirty refusal is
 		-- logged, never fatal, and the branch survives either way.

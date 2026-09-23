@@ -14,7 +14,9 @@ module's internal `../../std/…` requires identically. See
 `../README.md` for the full contract.
 
 - `openspec/` — groom, implement, verify an openspec change
-- `pr/` — convergent review→validate→fix→verify loop on a pull request
+- `pr/` — two operations over one review-pass atom on a pull request:
+  `review` (one unconditional pass, never fixes) and `reviewFixLoop`
+  (the convergent review→validate→fix→verify loop)
 - `issue/` — agent-free issue pickup: scan a queue label and claim the
   oldest eligible issue (earliest-claim marker protocol)
 - `factory/` — the composition playbook: drains the labeled issue queue

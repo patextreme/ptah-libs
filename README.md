@@ -59,7 +59,7 @@ ops:groom("add-auth")
 | `std.sessionConfig` | ordered session-config entries — the shared apply mechanism |
 | `std.worktree` | git worktree lifecycle over `ptah.exec`: `provision` (adopt / fast-forward-or-fail / create; never reset) and `teardown` (refuse-dirty; never branches) |
 | `openspec` | openspec change playbook (groom, implement, verify) |
-| `pr` | convergent PR review loop (typed judge + PR-comment ledger) |
+| `pr` | PR review playbook — `review` (one unconditional pass, never fixes) + `reviewFixLoop` (the convergent loop) over a typed judge + PR-comment ledger |
 | `issue` | agent-free issue pickup (queue-label scan + earliest-claim marker) |
 | `factory` | composition playbook (`issueToPR`, `drain`, and the module-level `initLabels` label alignment) — composes the issue, openspec, and pr playbooks and constructs them internally from its data-only config |
 
@@ -186,8 +186,10 @@ path only, non-converged-as-hand-off), and the environment requirements.
   `init.luau` module's relative requires resolve one directory off under
   luau-lsp.)
   - `openspec/` — groom, implement, and verify an openspec change.
-  - `pr/` — convergent review→validate→fix→verify loop
-    against a pull request (typed judge, PR-comment ledger; ships the
+  - `pr/` — two operations over one review-pass atom against a pull
+    request: `review` (one unconditional pass, never fixes) and
+    `reviewFixLoop` (the convergent review→validate→fix→verify loop)
+    (typed judge, PR-comment ledger; ships the
     built-in persona and the component-owned protocol fragment).
   - `issue/` — agent-free pickup: scan a repo-configured queue label
     and claim the oldest eligible issue with an earliest-wins marker
@@ -230,12 +232,14 @@ loops share these conventions, documented here so drift stays visible:
   probe session and raises no ask at all — its `needsHuman` flag is
   report-only.
 - Every prompt of a loop is prefixed `[<prefix> iteration N of M]` so
-  the agent (and the logs) can see the loop state.
+  the agent (and the logs) can see the loop state. A lone operation with no
+  budget to count (the pr playbook's `review` pass) is prefixed with its own
+  phase header instead (`[pr-review pass]`).
 - Escalation is two-mode: **ask when a provider serves the request,
   hard fail when none does.** An ask is justified only by an
   operator-owned decision — one the agent has no authority to take and
   the loop cannot reverse at bounded cost; a confirmation or a
-  recoverable choice never asks (the pr review loop never asks at all:
+  recoverable choice never asks (the pr playbook never asks at all:
   the PR at merge time is its human checkpoint). A confirmed
   operator-owned decision routes through `std/escalate` — the work
   session stays open across the ask, and a human answer is sent back
@@ -311,7 +315,7 @@ local loop = libs.pr.new({
 	workingDir = wt.path,
 })
 
-loop:review("https://github.com/o/r/pull/42")
+loop:reviewFixLoop("https://github.com/o/r/pull/42")
 
 -- Teardown returns its outcome as data: a dirty refusal is the expected
 -- post-crash outcome, so log it and continue rather than failing the run.
