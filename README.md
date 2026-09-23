@@ -97,6 +97,8 @@ local factory = libs.factory.new({
 	conventions = "Read CONTEXT.md first; run the format and test commands before finishing.",
 	prContract = "Sign commits (DCO); keep Conventional Commits titles.",
 	maxReviewIterations = 10,
+	-- checks = { scope = "all" },          -- the review loop's check gate (pr playbook semantics); nil = gate off
+	-- reviewInstruction = "...",           -- the review persona; nil = built-in default
 })
 
 libs.factory.initLabels() -- optional, module-level: agent-free label alignment (bootstrap/drift repair)
@@ -122,6 +124,7 @@ path only, non-converged-as-hand-off), and the environment requirements.
   | --- | --- |
   | 0.1.0 | ptah 0.1.0 (session-config support and `session:sessionId()`) |
   | 0.3.0 | ptah 0.1.0 (no new ptah surface required) |
+  | 0.4.0 | ptah 0.1.0 (no new ptah surface required) |
 
 - **Offline test coverage lives upstream — and is pending.** The library's
   offline suite (mock agent, no network, no real agent) is maintained in the

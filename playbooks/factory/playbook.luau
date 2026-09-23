@@ -110,6 +110,17 @@ export type Config = {
 	prContract: string?,
 	-- The composed review loop's convergence cap (default 10).
 	maxReviewIterations: number?,
+	-- The composed review-fix loop's check gate, forwarded verbatim into the
+	-- internally constructed pr playbook (same field, same type — the
+	-- factory adds no default, rename, or validation; the pr playbook's
+	-- constructor owns all three). Nil keeps the gate off: no check state is
+	-- read, per the pr playbook's own opt-in semantics. See the pr
+	-- playbook's docs for the gate's behavior and budget arithmetic.
+	checks: prPlaybook.ChecksConfig?,
+	-- The composed review loop's review persona, forwarded verbatim into
+	-- the internally constructed pr playbook. Nil selects the pr playbook's
+	-- built-in default persona, as today.
+	reviewInstruction: string?,
 	-- Bound on the change-resolution hand-off (default 3): exhaustion fails
 	-- the issue.
 	resolveChangeAttempts: number?,
@@ -561,6 +572,13 @@ function M.new(config: Config): Instance
 			reporterSessionConfig = config.reporterSessionConfig,
 			workingDir = wt.path,
 			maxIterations = maxReviewIterations,
+			-- Verbatim passthrough (D1/D2): nil reaches the pr playbook as nil
+			-- — gate off, built-in default persona — so unset behavior is
+			-- identical by construction. No factory-side defaults,
+			-- validation, or reshaping (validation stays in the pr
+			-- playbook's constructor, D3).
+			checks = config.checks,
+			reviewInstruction = config.reviewInstruction,
 		})
 
 		local change = resolveChange(brief, wt.path)
