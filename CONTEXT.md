@@ -118,9 +118,40 @@ deleting the ledger produces)
 **Review-fix loop**:
 The convergent loop over review passes and fix turns — a batched fix only
 when open blocking findings remain and budget remains, every push followed
-by another pass, ending converged or at the cap.
+by another pass, ending converged or at the cap. Converged means no open
+blocking findings — review-sourced or check findings — and, when the check
+gate is configured, green checks at the PR head.
 _Avoid_: review loop (the operation's former shape), fix loop (review
 issues the fixes; a fix never terminates the loop)
+
+**Check**:
+One entry of GitHub's status rollup for a commit — a check run or commit
+status with a name and a state (green, red, or pending). The platform's
+own verdict on a commit, distinct from the CI system that produced it.
+_Avoid_: CI (names the external system, not the platform signal), gate
+(that names the mechanism, not the signal)
+
+**Check finding**:
+The ledger finding derived from a red check at the PR head — playbook-owned
+deterministically (filed on red, closed on green, never judged), blocking
+like any other, and carrying the check name and failing run URL as a
+pointer rather than a diagnosis.
+_Avoid_: CI finding, check failure (the check's state, not the ledger entry)
+
+**Check gate**:
+The config-gated convergence mechanism of the review-fix loop: consult
+check state at the PR head wherever the loop can end converged, with a
+bounded poll for pending checks. Off by default; off means checks are
+invisible to the loop exactly as before.
+_Avoid_: CI gate, watch-CI (the rejected wait-for-green shape)
+
+**Repo gate commands**:
+The repository-specific verification commands (build, lint, test) the
+playbook never executes — reading the platform's check state is in scope
+when the check gate is on; running the repo's tooling is the work
+session's job, never the playbook's.
+_Avoid_: checks (that names the platform signal), gates (ambiguous with
+the check gate)
 
 **Ledger**:
 The durable machine-readable record of a PR's review state — findings with
