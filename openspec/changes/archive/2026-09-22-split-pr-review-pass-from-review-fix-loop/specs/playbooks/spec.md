@@ -211,11 +211,6 @@ ledger snapshot, and the posted report text (`report`).
 - **WHEN** the judge reports open blocking findings and the iteration cap has been reached
 - **THEN** no fix turn is issued; the loop ends, the operation returns a non-converged outcome carrying the verdict text, the ledger snapshot, and the report text, and the playbook produces a non-converged PR review report
 
-#### Scenario: Iteration cap
-
-- **WHEN** every pass is judge-rejected and the findings stay fixable up to the configured iteration cap
-- **THEN** the operation fails with an error reporting the cap was reached — the cap error, not a non-converged return, when no terminal report can be produced
-
 #### Scenario: Resume fast path fixes open blockers
 
 - **WHEN** a fresh `reviewFixLoop` operation resumes a ledger holding open blocking findings — including any carrying `needsHuman` — and budget remains
