@@ -761,19 +761,155 @@ one), the final ledger snapshot, and the posted report text (`report`).
 - **WHEN** a consumer shim configures the removed `model` or `judgeModel` field and runs `ptah check`
 - **THEN** check reports a type error naming the unknown field, steering the consumer to the `sessionConfig` entry form
 
+### Requirement: PR review check gate
+
+The pr playbook's review-fix loop SHALL support an optional **check gate**,
+configured through a `checks` table in Local config: `scope` (`"required"` —
+only checks the repository requires — or `"all"`), `pollBudgetMs` (default
+1,800,000), and `pollIntervalMs` (default 30,000). The gate is off when the
+table is absent: no check state is read, no check findings exist, and the
+loop's behavior is unchanged. The gate is a loop-only knob — inert for the
+`review` operation, which has no convergence decision to gate.
+
+When configured, the loop SHALL consult the PR's check state at the head
+commit at every point it can end converged: the mid-loop convergence exit and
+the resume clean-at-head fast path. The head SHA and the checks' states SHALL
+be read together — one read of head and states — so the head cannot move
+between the two. Check states classify as green (`SUCCESS`, `NEUTRAL`,
+`SKIPPED`), red (`FAILURE`, `TIMED_OUT`, `CANCELLED`, `STARTUP_FAILURE`, and
+commit-status `FAILURE`/`ERROR`), or pending (`QUEUED`, `IN_PROGRESS`,
+`PENDING`, and `STALE` — a run for a superseded commit carries no verdict
+about the head). With `scope = "required"`, only checks the repository
+requires count. An empty in-scope set — a repository with no checks, or one
+whose branch protection requires none — is vacuously green; it is the
+repository's configuration, and the gate gives it no special handling.
+
+A red check SHALL file a **check finding**: a playbook-owned blocking ledger
+finding with `needsHuman` false, `source` `"check"`, and the check name and
+failing run URL carried as a pointer — the fix session investigates from the
+pointer; the playbook executes no repo gate commands. Check findings flow
+through the loop's existing machinery: they count toward the open blocking
+count, drive fix turns, and receive fixing commits like any other blocking
+finding. Identity is one open finding per failing check name: red while a
+finding is open updates it in place, a green rollup at head closes every open
+check finding (status `fixed`, resolved count advanced), and a re-failure
+after a green close files a new finding. Check findings are never filed,
+updated, or closed by the judge: the ledger view handed to the judge excludes
+them, and a reconciliation record naming one is inert on it.
+
+Pending checks SHALL poll within `pollBudgetMs` at convergence decisions —
+bounded, never unbounded. Checks still pending at budget exhaustion end the
+loop non-converged with a named pending outcome: the status line names the
+pending checks and the outcome's checks snapshot carries state `pending`. A
+pending outcome is never converged, never a hang, and never a silent pass;
+the next run's resume fast path re-polls. The resume fast path over a ledger
+with open blocking findings SHALL perform a single non-waiting consult, so
+its fix turn batches check findings with review findings — and a check a
+human fixed out of band closes before the turn runs.
+
+Every terminal outcome of the gated loop SHALL carry check state: the
+operation's outcome gains a checks snapshot (`state`: `green`, `red`,
+`pending`, `off`, or `unknown`, with failing and pending check names; nil
+from `review`), and the report's status line gains the checks verdict —
+byte-identical to the ungated line when the gate is off. One final
+non-waiting consult at the terminal outcome supplies the snapshot when no
+convergence decision ran; its failure retries a bounded number of times (two)
+and then degrades to state `unknown` with a logged line — finished work never
+fails over a reporting read. A consult failure at a decision point fails the
+operation through the existing transport error path.
+
+Check-fix cycles consume `maxIterations` units like review-fix cycles — there
+is no separate budget; worst-case wait is `maxIterations` times
+`pollBudgetMs`. On the final unit, a judge-clean pass with a red check ends
+non-converged with the check finding open, exactly as a review finding would.
+With `dryRun`, a red check can never close (no push means no re-run): the
+loop ends non-converged at the cap — documented, not special-cased.
+
+#### Scenario: The gate off is unchanged
+
+- **WHEN** the playbook is configured without a `checks` table
+- **THEN** no check state is read, no check finding is ever filed, outcomes and reports are computed exactly as before, and the status line keeps its ungated form
+
+#### Scenario: A failing check cannot end converged
+
+- **WHEN** a convergence decision observes a red in-scope check at the PR head
+- **THEN** the playbook files a check finding named for the failing check, the outcome is non-converged, a fix turn resolves it through the existing machinery, and only a green rollup at head closes it
+
+#### Scenario: A fix-turn regression is picked up by the loop
+
+- **WHEN** a fix turn pushes a commit that breaks a check
+- **THEN** the next review pass's convergence decision observes the red check at the new head, files a check finding, and the loop fixes it — external CI is not the first to see the regression
+
+#### Scenario: The resume fast path consults checks
+
+- **WHEN** a fresh `reviewFixLoop` resumes a clean ledger at the current head with the gate configured
+- **THEN** the fast path consults check state first: green converges with no work session, red files a check finding and issues the fix turn, and pending polls within the budget before deciding
+
+#### Scenario: Pending at budget exhaustion is a named outcome
+
+- **WHEN** in-scope checks are still pending when the poll budget is exhausted at a convergence decision
+- **THEN** the loop ends non-converged, the status line names the pending checks, the outcome's checks snapshot carries state `pending` — never converged, never a hang, never a silent pass — and the next run's resume fast path re-polls
+
+#### Scenario: STALE runs are pending
+
+- **WHEN** the rollup carries a check run for a superseded commit
+- **THEN** it classifies as pending — it carries no verdict about the head, and re-runs arrive at the new head
+
+#### Scenario: An empty in-scope set is vacuously green
+
+- **WHEN** the gate is configured and the PR has no checks, or `scope = "required"` and branch protection requires none
+- **THEN** the convergence decision treats the checks as green with no special handling — the repository's branch protection configuration is the repository's responsibility
+
+#### Scenario: One finding per failing check, never re-filed
+
+- **WHEN** a check is red while its check finding is already open
+- **THEN** the finding is updated in place (fresh failing run URL, same id); when the rollup turns green at head every open check finding closes as `fixed`, and a later re-failure files a new finding rather than reopening the closed one
+
+#### Scenario: The judge never sees check findings
+
+- **WHEN** a gate consult has filed a check finding and the next review pass runs
+- **THEN** the ledger summary the judge reconciles excludes the check finding, and a reconciliation record naming its id — like any unknown or foreign id — has no effect on it
+
+#### Scenario: The report and outcome carry check state
+
+- **WHEN** the gated loop reaches any terminal outcome
+- **THEN** the status line carries the checks verdict (green, red with names, or pending with names), the outcome carries a checks snapshot with state and failing/pending names, `review`'s outcome carries nil, and a final-snapshot read that fails after its bounded retries degrades to state `unknown` with a logged line
+
+#### Scenario: The pointer, not the diagnosis
+
+- **WHEN** a check finding drives a fix turn
+- **THEN** the finding carries the check name and the failing run URL, and the fix session investigates from that pointer — the playbook itself executes no repo gate commands
+
+#### Scenario: Check-fix cycles share the loop budget
+
+- **WHEN** a check finding drives a fix turn
+- **THEN** the cycle consumes a `maxIterations` unit like a review-fix cycle, and on the final unit a judge-clean pass with a red check ends non-converged with the finding open — no fix is issued that no review would follow
+
+#### Scenario: dry-run cannot close a red check
+
+- **WHEN** the gate and `dryRun` are both configured and a check is red
+- **THEN** no push means no re-run, the check finding can never close, and the loop ends non-converged at the cap — the honest dry-run outcome, documented rather than special-cased
+
 ### Requirement: PR review-fix loop
 
 The library SHALL provide a review-fix loop operation (`reviewFixLoop`) on
 the pr playbook: the convergent review→validate→fix loop composed from
 review passes (per the PR review pass requirement, whose prompt, judge,
-ledger, and report machinery it shares) and fix turns. The playbook SHALL
-NOT read CI results or execute repo-specific gate commands; deterministic
-signal ingestion and post-loop policy are the calling script's
-responsibility, and the playbook SHALL document this boundary.
+ledger, and report machinery it shares) and fix turns. The playbook SHALL NOT
+execute repo-specific gate commands: running the repository's own
+verification tooling is the work session's job during a fix turn, never the
+playbook's. Reading the platform's check state SHALL happen only through the
+check gate (per the PR review check gate requirement) and only when that gate
+is configured; with the gate off, check state is invisible to the loop, and
+post-loop policy remains the calling script's responsibility. The playbook
+SHALL document this boundary.
 
-Convergence SHALL be computed from the judge's typed output: the loop
-converges when no open blocking findings remain. The loop's budget is a
-single `maxIterations` cap (default 8) over review passes. A fix turn
+Convergence SHALL be computed from open blocking findings — the judge's
+typed output, plus the check findings the check gate files when configured:
+the loop converges when no open blocking findings remain and the checks at
+the PR head are green (per the PR review check gate requirement; with the
+gate off, checks place no constraint on convergence). The loop's budget is a
+single `maxIterations` cap (default 10) over review passes. A fix turn
 SHALL be issued only when open blocking findings exist and budget remains;
 when the cap is reached with open findings, the loop SHALL NOT fix — it
 SHALL end and report a non-converged outcome. Every pushed fix is
@@ -800,15 +936,19 @@ ledger, have no loop effect: the determination persists and renders in the
 report. No ask is raised, so no ask can be refused, abort, or fail for
 lack of a provider: a provider-less environment behaves identically to a
 served one, and the report comment is the loop's only human-facing
-channel. The ledger's only writers are filing (open or deferred),
-reconciliation (resolved or updated), and verification (fixed); no
-mid-run path writes finding status by human decision, and no decisions
-record is written (legacy decisions records are read tolerantly and
-dropped on persist).
+channel. The ledger's finding writers are filing (open or deferred),
+reconciliation (resolved or updated), verification (fixed), and — for
+check findings only — the check gate (filed on red, updated while red,
+closed on green; per the PR review check gate requirement); no mid-run
+path writes finding status by human decision, and no decisions record is
+written (legacy decisions records are read tolerantly and dropped on
+persist).
 
 The `reviewFixLoop` operation SHALL return a typed outcome carrying a
 status (`converged` / `non-converged`), the final verdict text, the final
-ledger snapshot, and the posted report text (`report`).
+ledger snapshot, and the posted report text (`report`), plus the checks
+snapshot (`checks`, per the PR review check gate requirement) when the
+check gate is configured.
 
 #### Scenario: Loop composes passes and fix turns
 
@@ -827,7 +967,7 @@ ledger snapshot, and the posted report text (`report`).
 
 #### Scenario: Convergence is computed from typed findings
 
-- **WHEN** the judge's typed output reports no open blocking findings
+- **WHEN** the judge's typed output reports no open blocking findings, and the check gate is off or the checks are green at the PR head (per the PR review check gate requirement)
 - **THEN** the loop converges and the playbook produces a PR review report whose status line reports convergence
 
 #### Scenario: Fix never consumes the last unit
@@ -842,7 +982,7 @@ ledger snapshot, and the posted report text (`report`).
 
 #### Scenario: Resume fast path converges a clean ledger at head
 
-- **WHEN** a fresh `reviewFixLoop` operation resumes a ledger with no open blocking findings whose `lastReviewedSha` equals the current head
+- **WHEN** a fresh `reviewFixLoop` operation resumes a ledger with no open blocking findings whose `lastReviewedSha` equals the current head, and the check gate is off or green at head
 - **THEN** no work session runs; the report is produced from the ledger alone (no review prose) and the outcome is `converged`
 
 #### Scenario: Resume at the cap ends without a pass
@@ -883,12 +1023,12 @@ ledger snapshot, and the posted report text (`report`).
 #### Scenario: Config surface
 
 - **WHEN** a consumer constructs the playbook
-- **THEN** the config is the single shared surface per the PR review pass requirement, with `maxIterations` defaulting to 8 and `dryRun` defaulting to false for the loop
+- **THEN** the config is the single shared surface per the PR review pass requirement, with `maxIterations` defaulting to 10, `dryRun` defaulting to false, and the check gate's `checks` table absent (gate off) by default for the loop
 
 #### Scenario: Operation returns a typed outcome
 
 - **WHEN** the `reviewFixLoop` operation ends — converged, or non-converged at the cap
-- **THEN** the operation returns a typed outcome carrying the status (`converged` / `non-converged`), the final verdict text, the final ledger snapshot, and the report text, rather than only a verdict string
+- **THEN** the operation returns a typed outcome carrying the status (`converged` / `non-converged`), the final verdict text, the final ledger snapshot, the report text, and — when the check gate is configured — the checks snapshot, rather than only a verdict string
 
 ### Requirement: PR review instruction contract
 
@@ -897,8 +1037,8 @@ contract, identical for both operations — every review prompt of `review`
 and `reviewFixLoop` carries the same persona and protocol layers. The
 **persona** layer is the reviewer instruction: a configured
 `reviewInstruction` is a full replacement of the built-in default persona
-(only a nil value selects the default; an empty string stays configured as
-a loud misconfiguration) and carries no classification duties — the
+(only a nil value selects the default; an empty string stays configured as a
+loud misconfiguration) and carries no classification duties — the
 reviewer reviews freely in prose. The **protocol** layer is a
 component-owned instruction fragment appended to every review prompt at
 runtime and not configurable away: the delta-review rules, the in-session
@@ -912,12 +1052,14 @@ not sensitive to the quality or format of a repo-authored instruction.
 The playbook's config surface (the exported `Config` type's doc comments
 for `reviewInstruction` and `blockingAdditions`) SHALL state each field's
 layer and role, and SHALL state which knobs are loop-only (`dryRun`,
-`maxIterations`) — inert for `review`. The documentation SHALL also state
-the playbook's boundary: verdicts that do not reduce to a
+`maxIterations`, `checks`) — inert for `review`. The documentation SHALL
+also state the playbook's boundary: verdicts that do not reduce to a
 blocking/non-blocking classification (score gates, approve/request-changes
 votes, report-only reviews) are a different playbook, not an instruction
-swap, and deterministic signals (CI checks, configured gates) are outside
-the playbook — they belong to the calling script.
+swap, and executing repo gate commands is outside the playbook — platform
+check state joins the loop only through the check gate (per the PR review
+check gate requirement), and post-loop policy remains the calling
+script's.
 
 The documentation SHALL present pointer-style instructions — reviewer
 instruction text that references a repository document — as the
@@ -955,7 +1097,7 @@ classification directive (classification belongs to the judge).
 
 #### Scenario: Pointer pattern is the documented long form
 
-- **WHEN** a consumer consults the pr playbook's documentation with a long or repo-pinned reviewer instruction in mind
+- **WHEN** a consumer consults the playbook's documentation with a long or repo-pinned reviewer instruction in mind
 - **THEN** the documentation presents pointer-style text referencing a repository document as the recommended form
 
 ### Requirement: PR review ledger
@@ -969,13 +1111,15 @@ PR's intention (the PR title and body when present; otherwise the last
 commit message before the first ledger record, captured at discovery), the
 findings with their id, family, severity, validation status, the judge's
 `needsHuman` determination, status (`open` / `fixed` / `deferred` /
-`accepted`), and fixing commit where applicable, and the family table. The
+`accepted`), source (`review` or `check`) with the check name for check
+findings, and fixing commit where applicable, and the family table. The
 ledger SHALL be playbook-owned data; the documentation SHALL state that
 hand-editing it is unsupported, that a deleted ledger degrades a fresh run
 to a new discovery pass (today's per-run behavior), and that one
 operation per PR at a time is an environment requirement (two concurrent
 operations on one PR corrupt the in-place comment update). Legacy ledgers
-carrying a decisions record SHALL be read tolerantly; no new decisions are
+carrying a decisions record SHALL be read tolerantly, as shall findings
+without a `source` (read as review findings); no new decisions are
 recorded.
 
 A finding's `needsHuman` flag SHALL be recorded when the finding is filed,
@@ -986,8 +1130,13 @@ SHALL be read tolerantly: a finding without the field is treated as not
 needing a human, and the field is written on the next persist.
 
 Finding status SHALL be written by the judge at filing (open, or deferred
-for out-of-scope concerns) and by the reconciliation path (open → fixed
-when a fix is verified clean). Deferred is terminal: it has no exit
+for out-of-scope concerns), by the reconciliation path (open → fixed when a
+fix is verified clean), and — for check findings only — by the check gate
+(filed open on red, updated in place while red, closed `fixed` on green at
+head; per the PR review check gate requirement). The judge never files,
+updates, or closes a check finding: the ledger view the judge reconciles
+SHALL exclude check findings, and a reconciliation record naming one is
+inert on it. Deferred is terminal: it has no exit
 transitions, and a deferred concern that becomes in-scope again is filed
 as a new open finding. `accepted` is a legacy status: read tolerantly,
 terminal, and no new transition writes it (its only writer was the retired
@@ -1023,8 +1172,13 @@ limit fails loudly through the transport rather than truncating.
 
 #### Scenario: Legacy ledgers read tolerantly
 
-- **WHEN** the playbook reads a ledger written before the `needsHuman` field existed, or one carrying a decisions record or `accepted` findings from before the ask was retired
-- **THEN** findings parse without the field and are treated as not needing a human, decisions are ignored, `accepted` findings stay terminal, and the flag field is written on the next persist
+- **WHEN** the playbook reads a ledger written before the `needsHuman` field existed, one carrying a decisions record or `accepted` findings from before the ask was retired, or one written before the `source` field existed
+- **THEN** findings parse without the missing field and are treated as not needing a human and as review-sourced respectively, decisions are ignored, `accepted` findings stay terminal, and the missing fields are written on the next persist
+
+#### Scenario: Check findings are playbook-owned
+
+- **WHEN** the check gate files, updates, or closes a check finding
+- **THEN** the write is deterministic from observed check state at the PR head, the ledger view the judge reconciles excludes the finding, and a reconciliation record naming its id has no effect on it
 
 #### Scenario: Decisions recorded on answered asks
 
@@ -1087,8 +1241,12 @@ transport, matching the ledger's marker-and-edit pattern, so a re-run —
 of either operation — edits the existing report rather than appending
 another: one ever-current report; the ledger carries the history. The
 playbook SHALL prepend a deterministic status line derived from the ledger
-— the outcome status and the count of open blocking findings — so the
-report's convergence claim is never agent-authored. The reporter SHALL
+— the outcome status and the count of open blocking findings — and, when
+the operation ran with the check gate configured, the checks verdict
+(green, red with the failing check names, or pending with the pending
+check names; per the PR review check gate requirement), so the report's
+convergence claim is never agent-authored. With the gate off the line is
+byte-identical to the ungated form. The reporter SHALL
 author the remainder of the body under a playbook-defined section
 contract.
 
@@ -1136,7 +1294,7 @@ whole-loop source; the prose is supplementary.
 #### Scenario: Playbook owns the status line
 
 - **WHEN** the report is produced for any outcome of either operation
-- **THEN** the status line naming the outcome status and the open blocking count is composed by the playbook from the ledger, not by the reporter
+- **THEN** the status line naming the outcome status and the open blocking count — plus the checks verdict when the check gate is configured for the operation — is composed by the playbook from the ledger and the checks snapshot, not by the reporter
 
 #### Scenario: Reporter exhaustion fails the operation
 

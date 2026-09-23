@@ -45,6 +45,32 @@ export type Severity = "blocking" | "non-blocking"
 export type ValidationStatus = "validated" | "refuted" | "unvalidated"
 export type FindingStatus = "open" | "fixed" | "deferred" | "accepted"
 
+-- Check-state classes (design D4): terminal rollup verdicts map to green
+-- or red; everything else — running, queued, awaiting approval, and STALE
+-- (a run for a superseded commit carries no verdict about the head) — is
+-- pending.
+export type CheckState = "green" | "red" | "pending"
+-- The check gate's scope: `"required"` counts only checks the repository
+-- requires, `"all"` takes the rollup as-is.
+export type CheckScope = "required" | "all"
+-- A finding's writer: the judge ("review", the default) or the check gate
+-- ("check", the playbook's deterministic writer).
+export type FindingSource = "review" | "check"
+
+-- One classified check read: the atomic query's result — the head SHA and
+-- the in-scope rollup's classification read together, so the head cannot
+-- move between the SHA read and the state read. `failing`/`pending` are
+-- the in-scope check names in each class (sorted, for stable display);
+-- `urls` maps each failing check name to its failing-run URL — the
+-- pointer a fix session investigates, never a diagnosis.
+export type ChecksRead = {
+	sha: string,
+	state: CheckState,
+	failing: { string },
+	pending: { string },
+	urls: { [string]: string },
+}
+
 -- One ledger finding: the durable record of an issue across passes.
 export type LedgerFinding = {
 	id: string,
@@ -64,6 +90,28 @@ export type LedgerFinding = {
 	needsHuman: boolean,
 	-- The commit that carried the fix, once a fix turn has pushed one.
 	fixCommit: string?,
+	-- The finding's writer: the judge's typed output ("review") or the
+	-- check gate's deterministic writer ("check"). Read tolerantly: a
+	-- ledger written before the field existed reads as review-sourced.
+	source: FindingSource,
+	-- For a check finding only: the check name the finding tracks — the
+	-- identity key (one open finding per failing check name). Nil for a
+	-- review finding.
+	check: string?,
+}
+
+-- The check gate's config (design D8): the gate is off when the table is
+-- absent. Loop-only — inert for `review`, which has no convergence
+-- decision to gate.
+export type ChecksConfig = {
+	-- `"required"` counts only checks the repository requires;
+	-- `"all"` takes the status rollup as-is.
+	scope: CheckScope,
+	-- Per gate consult, in milliseconds (default 1,800,000 — 30 minutes).
+	-- Worst-case wall clock is maxIterations × pollBudgetMs.
+	pollBudgetMs: number?,
+	-- Poll spacing while checks run, in milliseconds (default 30,000).
+	pollIntervalMs: number?,
 }
 
 -- The playbook-owned ledger: PR identity, the discovery and last-reviewed
@@ -124,6 +172,18 @@ export type Report = {
 -- is always a review pass's prose for `review` (the pass always runs); the
 -- `""` case only ever arises from the loop's resume fast paths, which run
 -- no pass.
+--
+-- One check gate read, carried on the loop's outcome: `green`/`red`/
+-- `pending` from the classified read at the terminal head, `off` when the
+-- gate is unconfigured, `unknown` when the terminal read failed after its
+-- bounded retries. `failing`/`pending` name the in-scope checks in each
+-- class. Loop-only: `review`'s outcome carries nil.
+export type ChecksSnapshot = {
+	state: "green" | "red" | "pending" | "off" | "unknown",
+	failing: { string },
+	pending: { string },
+}
+
 export type Outcome = {
 	status: "converged" | "non-converged",
 	verdict: string,
@@ -131,6 +191,10 @@ export type Outcome = {
 	-- The posted PR review report text: the playbook's deterministic status
 	-- line followed by the reporter's authored body.
 	report: string,
+	-- The check gate's terminal snapshot: always filled by `reviewFixLoop`
+	-- (`off` when ungated, `unknown` on a degraded terminal read); nil from
+	-- `review` — loop-only, like `dryRun` and `maxIterations`.
+	checks: ChecksSnapshot?,
 }
 
 export type Config = {
@@ -176,10 +240,16 @@ export type Config = {
 	-- reviews and fixes but never pushes to the PR branch.
 	-- reviewFixLoop only — inert for `review` (a pass never pushes).
 	dryRun: boolean?,
-	-- Convergence cap (default 8) over loop units; a fix turn is issued only
+	-- Convergence cap (default 10) over loop units; a fix turn is issued only
 	-- when budget remains. reviewFixLoop only — inert for `review` (a pass
 	-- never loops).
 	maxIterations: number?,
+	-- The check gate: consult check state at the PR head wherever the loop
+	-- can end converged, route red checks through the fix machinery as
+	-- playbook-owned check findings, and bound pending waits. Nil keeps the
+	-- gate off: no check state is read, no check findings exist, behavior
+	-- unchanged. reviewFixLoop only — inert for `review`.
+	checks: ChecksConfig?,
 }
 
 -- The outcome status both operations compute from the ledger's open blocking
@@ -194,7 +264,9 @@ type Operation = {
 	-- The review-pass primitive: prompt (a caller-supplied header plus the
 	-- persona/protocol review prompt) → work session → typed judge →
 	-- applyFindings → persist. Returns the pass's verdict prose, the
-	-- outcome status implied by the open blocking count, and the still-open
+	-- outcome status implied by the judge's cleanliness (no open blocking
+	-- review findings — check findings are excluded, the consult owns
+	-- them), and the still-open
 	-- work session — the loop issues its fix turn in the same session; a
 	-- lone pass closes it.
 	reviewPass: (params: {
@@ -210,6 +282,18 @@ type Operation = {
 	-- `passes` is the operation's pass count: 1 for `review`; the loop's
 	-- completed units for `reviewFixLoop` (0 when a resume ran no pass).
 	finish: (status: OutcomeStatus, verdictText: string, prose: string?, passes: number) -> Outcome,
+	-- The check gate's consults (design D2), wired only when the gate is
+	-- configured — nil otherwise, so an ungated loop never reads check
+	-- state. The gate consult polls within the budget (run at the places
+	-- the loop can end converged); the snapshot consult reads once, no
+	-- wait (run at the resume open-blockers fast path). Both reconcile
+	-- the read into the ledger and persist when it changed.
+	gateConsult: (() -> ChecksRead)?,
+	snapshotConsult: (() -> ChecksRead)?,
+	-- Records that a push just moved the PR head: the last consult's read
+	-- no longer describes the terminal state, so the terminal snapshot
+	-- re-reads. Nil (a no-op) when the gate is off.
+	notePush: (() -> ())?,
 }
 
 export type Instance = {
@@ -227,9 +311,18 @@ export type Instance = {
 	reviewFixLoop: (self: Instance, prUrl: string) -> Outcome,
 }
 
-local DEFAULT_MAX_ITERATIONS = 8
+-- The convergence cap's default. Moved 8 → 10 by the check gate change:
+-- check-fix cycles consume loop units like review-fix cycles, so the old
+-- default starved the loop one unit sooner on gated repos. Migration note
+-- (the one deliberate gate-off behavior change): consumers wanting the
+-- old cap set `maxIterations = 8` explicitly.
+local DEFAULT_MAX_ITERATIONS = 10
 local DEFAULT_JUDGE_ATTEMPTS = 3
 local DEFAULT_REPORTER_ATTEMPTS = 3
+-- The check gate's defaults (design D6/D8): a 30-minute budget per gate
+-- consult, polled every 30 seconds.
+local DEFAULT_POLL_BUDGET_MS = 1_800_000
+local DEFAULT_POLL_INTERVAL_MS = 30_000
 local LEDGER_MARKER = "<!-- ptah:pr-review-ledger -->"
 local REPORT_MARKER = "<!-- ptah:pr-review-report -->"
 -- The report's *Findings resolved* list caps at the 50 most recent entries;
@@ -324,6 +417,12 @@ local function parseLedgerBody(body: string): Ledger?
 	for _, finding in ledger.findings do
 		if type(finding) == "table" then
 			finding.needsHuman = finding.needsHuman == true
+			-- Ledgers written before `source`/`check` existed read
+			-- tolerantly: a finding without the field is review-sourced,
+			-- and only a check finding carries a check name. Both fields
+			-- are written on the next persist.
+			finding.source = if finding.source == "check" then "check" else "review"
+			finding.check = if finding.source == "check" and type(finding.check) == "string" then finding.check else nil
 		end
 	end
 	return ledger
@@ -489,6 +588,168 @@ local function fetchHeadSha(prUrl: string): string
 	return sha
 end
 
+-- ---------------------------------------------------------------------------
+-- Check-state transport (std/gh): the atomic check read behind the gate
+-- ---------------------------------------------------------------------------
+
+-- Design D4's classification tables. A CheckRun that has not reached a
+-- terminal status is pending before its conclusion is read; any terminal
+-- conclusion outside the green and red sets (the live API also surfaces
+-- ACTION_REQUIRED — a run awaiting maintainer approval — and could surface
+-- others) classifies as pending: the check has produced no verdict about
+-- the head. StatusContext states follow the same rule (STALE and EXPECTED
+-- are pending, never red).
+local CHECK_RUN_GREEN: { [string]: boolean } = { SUCCESS = true, NEUTRAL = true, SKIPPED = true }
+local CHECK_RUN_RED: { [string]: boolean } = { FAILURE = true, TIMED_OUT = true, CANCELLED = true, STARTUP_FAILURE = true }
+local STATUS_GREEN: { [string]: boolean } = { SUCCESS = true }
+local STATUS_RED: { [string]: boolean } = { FAILURE = true, ERROR = true }
+
+local function classifyCheckRun(status: any, conclusion: any): CheckState
+	if status ~= "COMPLETED" then
+		return "pending"
+	end
+	if type(conclusion) ~= "string" then
+		return "pending"
+	end
+	if CHECK_RUN_GREEN[conclusion] then
+		return "green"
+	end
+	if CHECK_RUN_RED[conclusion] then
+		return "red"
+	end
+	return "pending"
+end
+
+local function classifyStatusContext(state: any): CheckState
+	if type(state) ~= "string" then
+		return "pending"
+	end
+	if STATUS_GREEN[state] then
+		return "green"
+	end
+	if STATUS_RED[state] then
+		return "red"
+	end
+	return "pending"
+end
+
+-- The atomic check read (design D3; field spellings verified live — see
+-- the change's implementation notes): head SHA and rollup in one query,
+-- with per-run required-ness. Pinned spellings: `CheckRun.
+-- name/status/conclusion/detailsUrl` + `isRequired(pullRequestNumber:)`
+-- (not `pullNumber`), `StatusContext.context/state/targetUrl`; pagination
+-- metadata lives on the `contexts` connection. One query for head + states
+-- + required-ness eliminates the read-skew race (the head cannot move
+-- between a SHA read and a checks read).
+local CHECKS_QUERY = [[query($owner:String!,$repo:String!,$number:Int!){
+  repository(owner:$owner,name:$repo){
+    pullRequest(number:$number){
+      headRefOid
+      statusCheckRollup{
+        contexts(first:100){
+          pageInfo { hasNextPage }
+          nodes{
+            __typename
+            ... on CheckRun { name status conclusion detailsUrl isRequired(pullRequestNumber:$number) }
+            ... on StatusContext { context state targetUrl }
+          }
+        }
+      }
+    }
+  }
+}]]
+
+-- Read and classify the PR's check state at its head in one call. Under
+-- `"required"` scope only checks the repository required count (a commit
+-- status carries no required-ness through the rollup — `isRequired`
+-- exists only on CheckRun — so StatusContexts cannot count as required);
+-- under `"all"` scope the rollup counts as-is. The empty in-scope set is
+-- vacuously green (design D4). A rollup larger than the 100-context page
+-- cap logs a truncation line and classifies the first page only — notable,
+-- not fatal.
+local function readChecks(prUrl: string, scope: CheckScope): ChecksRead
+	local ref = parsePrUrl(prUrl)
+	if ref == nil then
+		error(`pr-review: {prUrl} is not a GitHub pull request URL`)
+	end
+	local outcome = gh.run(
+		{
+			"api",
+			"graphql",
+			"-f",
+			`query={CHECKS_QUERY}`,
+			"-f",
+			`owner={ref.owner}`,
+			"-f",
+			`repo={ref.repo}`,
+			"-F",
+			`number={ref.number}`,
+		},
+		{ json = true }
+	)
+	if not outcome.ok then
+		error(`pr-review: could not read the check rollup for {prUrl}: {outcome.stderr}`)
+	end
+	local data = outcome.json
+	local repository = if type(data) == "table" and type(data.data) == "table" then data.data.repository else nil
+	local pull = if type(repository) == "table" then repository.pullRequest else nil
+	if type(pull) ~= "table" then
+		error(`pr-review: the check rollup read for {prUrl} returned no pull request node`)
+	end
+	local sha = pull.headRefOid
+	if type(sha) ~= "string" then
+		error(`pr-review: the check rollup read for {prUrl} carried no head SHA`)
+	end
+	local failingNames: { string } = {}
+	local pendingNames: { string } = {}
+	local urls: { [string]: string } = {}
+	local rollup = pull.statusCheckRollup
+	local contexts = if type(rollup) == "table" and type(rollup.contexts) == "table" then rollup.contexts else nil
+	if type(contexts) == "table" and type(contexts.pageInfo) == "table" and contexts.pageInfo.hasNextPage == true then
+		ptah.log(
+			`pr-review: the check rollup for {prUrl} exceeds the 100-context page cap — only the first page classifies`
+		)
+	end
+	local nodes = if type(contexts) == "table" and type(contexts.nodes) == "table" then contexts.nodes else {}
+	for _, node in nodes do
+		if type(node) ~= "table" then
+			continue
+		end
+		if node.__typename == "CheckRun" then
+			if scope == "required" and node.isRequired ~= true then
+				continue
+			end
+			local name = node.name
+			if type(name) ~= "string" then
+				continue
+			end
+			local state = classifyCheckRun(node.status, node.conclusion)
+			if state == "red" then
+				table.insert(failingNames, name)
+				urls[name] = if type(node.detailsUrl) == "string" then node.detailsUrl else ""
+			elseif state == "pending" then
+				table.insert(pendingNames, name)
+			end
+		elseif node.__typename == "StatusContext" and scope ~= "required" then
+			local name = node.context
+			if type(name) ~= "string" then
+				continue
+			end
+			local state = classifyStatusContext(node.state)
+			if state == "red" then
+				table.insert(failingNames, name)
+				urls[name] = if type(node.targetUrl) == "string" then node.targetUrl else ""
+			elseif state == "pending" then
+				table.insert(pendingNames, name)
+			end
+		end
+	end
+	table.sort(failingNames)
+	table.sort(pendingNames)
+	local state: CheckState = if #failingNames > 0 then "red" elseif #pendingNames > 0 then "pending" else "green"
+	return { sha = sha, state = state, failing = failingNames, pending = pendingNames, urls = urls }
+end
+
 local function lastCommitMessage(commits: any): string
 	if type(commits) ~= "table" then
 		return ""
@@ -586,6 +847,21 @@ local function hasOpenBlocking(ledger: Ledger): boolean
 	return openBlockingCount(ledger) > 0
 end
 
+-- Open blocking findings the JUDGE owns: check findings are invisible to
+-- the judge (it never saw check state, so it can never reconcile one),
+-- so they must not make a pass look judge-dirty — a pass's convergence
+-- candidacy is the judge's verdict on review findings, and the check
+-- gate's consult decides the check findings' side separately (design D5).
+local function openBlockingReviewCount(ledger: Ledger): number
+	local count = 0
+	for _, finding in ledger.findings do
+		if finding.severity == "blocking" and finding.status == "open" and finding.source ~= "check" then
+			count += 1
+		end
+	end
+	return count
+end
+
 local function nextFindingId(ledger: Ledger): number
 	local maxN = ledger.resolvedCount
 	for _, finding in ledger.findings do
@@ -607,7 +883,9 @@ local function ledgerSummary(ledger: Ledger?): string
 	end
 	local openFindings: { string } = {}
 	for _, finding in ledger.findings do
-		if finding.status == "open" then
+		-- Check findings are invisible to the judge: it never saw check
+		-- state, so it can never classify or reconcile one truthfully.
+		if finding.status == "open" and finding.source ~= "check" then
 			table.insert(
 				openFindings,
 				`{finding.id} ({finding.severity}, family {finding.family}, validation {finding.validation}): {finding.title}`
@@ -624,7 +902,7 @@ local function ledgerSummary(ledger: Ledger?): string
 	-- duplicate.
 	local deferredFindings: { string } = {}
 	for _, finding in ledger.findings do
-		if finding.status == "deferred" then
+		if finding.status == "deferred" and finding.source ~= "check" then
 			table.insert(
 				deferredFindings,
 				`{finding.id} ({finding.severity}, family {finding.family}): {finding.title}`
@@ -679,8 +957,11 @@ end
 local function applyFindings(ledger: Ledger, findings: Findings): { LedgerFinding }
 	for _, rec in findings.priorFindingsStatus do
 		local finding = ledgerFindingById(ledger, rec.id)
-		if finding == nil then
-			continue -- an unknown id is inert: never fixed, never flagged
+		if finding == nil or finding.source == "check" then
+			continue -- an unknown id is inert: never fixed, never flagged.
+			-- A check finding is equally foreign to the judge: it never
+			-- saw the id (the summary excludes check findings), so any
+			-- reconciliation record naming one is inert on it.
 		end
 		if finding.status == "open" or finding.status == "deferred" then
 			finding.needsHuman = rec.needsHuman == true
@@ -703,6 +984,8 @@ local function applyFindings(ledger: Ledger, findings: Findings): { LedgerFindin
 			status = judgeFinding.status,
 			needsHuman = judgeFinding.needsHuman,
 			fixCommit = nil,
+			source = "review",
+			check = nil,
 		}
 		table.insert(ledger.findings, finding)
 		table.insert(filed, finding)
@@ -712,6 +995,159 @@ local function applyFindings(ledger: Ledger, findings: Findings): { LedgerFindin
 		end
 	end
 	return filed
+end
+
+-- The failing-check title (design D5): a pointer, not a diagnosis — the
+-- fix session investigates from the run URL; the playbook parses no logs.
+local function checkTitle(name: string, url: string): string
+	if url == "" then
+		return `CI check "{name}" failing`
+	end
+	return `CI check "{name}" failing (run: {url})`
+end
+
+-- The check gate's ledger writer (design D5): reconcile the classified
+-- check read into the ledger. Deterministic — the judge never sees check
+-- findings (the summary excludes them; a reconciliation record naming one
+-- is inert), so this is the entry's only writer besides retention.
+-- Green at head closes EVERY open check finding (`fixed`, resolved count
+-- advanced) — the all-close rule means a check that leaves the gate's
+-- scope never orphans a finding; red updates-or-files exactly one open
+-- finding per failing check name (same id while red: fresh run URL, same
+-- finding); pending files nothing. Returns whether the ledger changed.
+local function reconcileChecks(ledger: Ledger, read: ChecksRead): boolean
+	local changed = false
+	if read.state == "green" then
+		for _, finding in ledger.findings do
+			if finding.source == "check" and finding.status == "open" then
+				finding.status = "fixed"
+				ledger.resolvedCount += 1
+				changed = true
+			end
+		end
+	elseif read.state == "red" then
+		for _, name in read.failing do
+			-- Identity is one open finding per failing check name, keyed by
+			-- source + check: update the open one in place, else file.
+			local existing: LedgerFinding? = nil
+			for _, finding in ledger.findings do
+				if finding.source == "check" and finding.check == name and finding.status == "open" then
+					existing = finding
+					break
+				end
+			end
+			local title = checkTitle(name, read.urls[name] or "")
+			if existing ~= nil then
+				if existing.title ~= title then
+					existing.title = title
+					changed = true
+				end
+			else
+				local finding: LedgerFinding = {
+					id = `f{nextFindingId(ledger)}`,
+					title = title,
+					family = "check",
+					severity = "blocking",
+					validation = "validated",
+					status = "open",
+					needsHuman = false,
+					fixCommit = nil,
+					source = "check",
+					check = name,
+				}
+				table.insert(ledger.findings, finding)
+				if not contains(ledger.families, "check") then
+					table.insert(ledger.families, "check")
+				end
+				changed = true
+			end
+		end
+	end
+	-- A pending rollup files nothing: a check still running carries no
+	-- verdict about the head, and the gate's poll budget bounds the wait.
+	return changed
+end
+
+-- The two consult flavors (design D2), the check gate's only reads of
+-- check state. Both reconcile the read into the ledger (filing/closing
+-- check findings) and persist when it changed.
+
+-- The snapshot consult: a single read, no wait — used at the resume
+-- open-blockers fast path (so the fix turn batches check findings with
+-- review findings) and, with bounded retries, at terminal outcomes.
+local function snapshotConsult(
+	prUrl: string,
+	scope: CheckScope,
+	ledger: Ledger,
+	persist: () -> ()
+): ChecksRead
+	local read = readChecks(prUrl, scope)
+	if reconcileChecks(ledger, read) then
+		persist()
+	end
+	return read
+end
+
+-- The gate consult: poll within the budget, used at the places the loop
+-- can end converged — the mid-loop convergence exit and the resume
+-- clean-at-head fast path (both review-clean by construction). Each
+-- iteration reads; a terminal class for the head (green or red) breaks;
+-- pending sleeps the interval. Still pending at budget exhaustion is a
+-- named pending result — never a hang, never a silent pass.
+local function gateConsult(
+	prUrl: string,
+	scope: CheckScope,
+	pollBudgetMs: number,
+	pollIntervalMs: number,
+	ledger: Ledger,
+	persist: () -> ()
+): ChecksRead
+	local maxPolls = math.ceil(pollBudgetMs / pollIntervalMs)
+	local read = readChecks(prUrl, scope)
+	local polls = 0
+	while read.state == "pending" and polls < maxPolls do
+		polls += 1
+		ptah.log(
+			`pr-review: checks pending at {prUrl} — poll {polls}/{maxPolls} of the {pollBudgetMs}ms budget, sleeping {pollIntervalMs}ms`
+		)
+		ptah.sleep(pollIntervalMs)
+		read = readChecks(prUrl, scope)
+	end
+	if read.state == "pending" then
+		ptah.log(
+			`pr-review: checks still pending after {maxPolls} polls ({pollBudgetMs}ms budget exhausted) — ending with a named pending outcome`
+		)
+	end
+	if reconcileChecks(ledger, read) then
+		persist()
+	end
+	return read
+end
+
+-- Attempts allowed for the terminal checks read: the initial read plus
+-- two bounded retries.
+local DEFAULT_TERMINAL_CHECK_ATTEMPTS = 3
+
+-- The terminal snapshot read (design D2/D7): one non-waiting consult, two
+-- bounded retries on transport failure, then degrade to `unknown` with a
+-- logged line — finished work never fails over a reporting read. Unlike a
+-- decision-point read, whose failure fails the operation through the
+-- transport's error path (resumable; the ledger persists at each phase),
+-- this read must never sink an operation that already finished its work.
+local function terminalChecks(prUrl: string, scope: CheckScope, ledger: Ledger, persist: () -> ()): ChecksSnapshot
+	local attempts = DEFAULT_TERMINAL_CHECK_ATTEMPTS
+	for attempt = 1, attempts do
+		local ok, read = pcall(snapshotConsult, prUrl, scope, ledger, persist)
+		if ok and type(read) == "table" then
+			local checksRead = read :: ChecksRead
+			return { state = checksRead.state, failing = checksRead.failing, pending = checksRead.pending }
+		end
+		ptah.log(`pr-review: the terminal check read for {prUrl} failed (attempt {attempt}/{attempts})`)
+	end
+	ptah.log(
+		`pr-review: the terminal check read for {prUrl} failed after {attempts} attempts — degrading the checks snapshot to unknown`
+	)
+	return { state = "unknown", failing = {}, pending = {} }
 end
 
 -- ---------------------------------------------------------------------------
@@ -783,11 +1219,14 @@ end
 -- Render one ledger finding as a one-line entry (the fixing commit, when
 -- present, travels with it; a persisted `needsHuman` flag renders on open
 -- findings' lines — a pointer for the human reviewing the PR, never a
--- gate).
+-- gate). A check finding additionally renders its check name — the
+-- identity key — and its title carries the failing-run URL (D5's title
+-- format), so the report's open blocking groups show both.
 local function renderFinding(finding: LedgerFinding): string
 	local flag = if finding.needsHuman and finding.status == "open" then ", needs human" else ""
 	local fix = if finding.fixCommit ~= nil and finding.fixCommit ~= "" then `, fix {finding.fixCommit}` else ""
-	return `- {finding.id} ({finding.severity}, family {finding.family}, validation {finding.validation}{flag}{fix}): {finding.title}`
+	local check = if finding.source == "check" and finding.check ~= nil then `, check {finding.check}` else ""
+	return `- {finding.id} ({finding.severity}, family {finding.family}, validation {finding.validation}{check}{flag}{fix}): {finding.title}`
 end
 
 -- The full ledger render handed to the reporter: every status group
@@ -912,12 +1351,27 @@ local function buildReporterPrompt(
 	}, "\n")
 end
 
--- The deterministic status line: composed by the playbook from the ledger so
--- the report's convergence claim is never agent-authored.
-local function statusLine(status: "converged" | "non-converged", ledger: Ledger): string
+-- The deterministic status line: composed by the playbook from the ledger
+-- — and, when the check gate is configured, the checks snapshot — so the
+-- report's convergence claim is never agent-authored. Gate off (nil or
+-- `off`) keeps the line byte-identical to the ungated form.
+local function statusLine(status: "converged" | "non-converged", ledger: Ledger, checks: ChecksSnapshot?): string
 	local open = openBlockingCount(ledger)
 	local noun = if open == 1 then "finding" else "findings"
-	return `**PR review report — {status}** ({open} open blocking {noun})`
+	local line = `**PR review report — {status}** ({open} open blocking {noun})`
+	if checks == nil or checks.state == "off" then
+		return line
+	end
+	if checks.state == "green" then
+		line ..= "; checks green"
+	elseif checks.state == "red" then
+		line ..= `; checks red: {table.concat(checks.failing, ", ")}`
+	elseif checks.state == "pending" then
+		line ..= `; checks pending: {table.concat(checks.pending, ", ")}`
+	else
+		line ..= "; checks unknown"
+	end
+	return line
 end
 
 -- ---------------------------------------------------------------------------
@@ -982,12 +1436,50 @@ function M.new(config: Config): Instance
 	local reporterAgent: Agent = config.reporterAgent
 	local persona = config.reviewInstruction or defaultInstruction
 
+	-- The check gate's resolved config (design D8): validated here — fail
+	-- fast on misconfiguration, not mid-loop. Nil scope means the gate is
+	-- off and no check state is ever read.
+	local checksScope: CheckScope? = nil
+	local checksPollBudgetMs = DEFAULT_POLL_BUDGET_MS
+	local checksPollIntervalMs = DEFAULT_POLL_INTERVAL_MS
+	if config.checks ~= nil then
+		local checks = config.checks
+		if checks.scope ~= "required" and checks.scope ~= "all" then
+			error(`pr-review: checks.scope must be "required" or "all" (got {tostring(checks.scope)})`)
+		end
+		if checks.pollBudgetMs ~= nil then
+			local v = checks.pollBudgetMs
+			if type(v) ~= "number" or v ~= v or v <= 0 then
+				error(`pr-review: checks.pollBudgetMs must be a positive, non-zero number of milliseconds (got {tostring(v)})`)
+			end
+			checksPollBudgetMs = v
+		end
+		if checks.pollIntervalMs ~= nil then
+			local v = checks.pollIntervalMs
+			if type(v) ~= "number" or v ~= v or v <= 0 then
+				error(`pr-review: checks.pollIntervalMs must be a positive, non-zero number of milliseconds (got {tostring(v)})`)
+			end
+			checksPollIntervalMs = v
+		end
+		if checksPollIntervalMs > checksPollBudgetMs then
+			error(
+				`pr-review: checks.pollIntervalMs ({checksPollIntervalMs}) must not exceed checks.pollBudgetMs ({checksPollBudgetMs})`
+			)
+		end
+		checksScope = checks.scope
+	end
+
 	-- One operation invocation's shared machinery, extracted so the pass
 	-- cannot drift between the two operations: the ledger and its comment
 	-- id, in-place persistence, the review-pass primitive, and the terminal
 	-- report step. `review` runs the primitive once; `reviewFixLoop` runs it
 	-- once per unit.
-	local function operation(prUrl: string, ledger: Ledger, commentId: number?): Operation
+	local function operation(
+		prUrl: string,
+		ledger: Ledger,
+		commentId: number?,
+		checks: { scope: CheckScope, pollBudgetMs: number, pollIntervalMs: number }?
+	): Operation
 		local function persist()
 			if commentId == nil then
 				commentId = createLedgerComment(prUrl, ledger)
@@ -995,6 +1487,13 @@ function M.new(config: Config): Instance
 				updateLedgerComment(prUrl, commentId, ledger)
 			end
 		end
+
+		-- The check gate's consult tracking: the last consult's read, and
+		-- whether a push has moved the head since. The terminal snapshot
+		-- reuses the read while it still describes the head; after a push
+		-- it re-reads.
+		local lastGateRead: ChecksRead? = nil
+		local pushedAfterConsult = false
 
 		-- The single terminal report step: every returning outcome routes
 		-- through it, after the ledger is persisted and the work session
@@ -1004,6 +1503,21 @@ function M.new(config: Config): Instance
 		-- the operation's pass count (1 for a lone pass; the loop's
 		-- completed units, 0 when a resume ran no pass).
 		local function finish(status: OutcomeStatus, verdictText: string, prose: string?, passes: number): Outcome
+			-- The terminal checks snapshot (design D2/D7): when a consult's
+			-- read still describes the head, reuse it; otherwise one
+			-- non-waiting consult (bounded retries, then `unknown`) supplies
+			-- it, so the report and outcome carry check state even when no
+			-- convergence decision ran. Gate off → nil (the loop fills `off`;
+			-- `review` leaves it nil).
+			local checksSnapshot: ChecksSnapshot? = nil
+			if checks ~= nil then
+				local reused = lastGateRead
+				if reused ~= nil and not pushedAfterConsult then
+					checksSnapshot = { state = reused.state, failing = reused.failing, pending = reused.pending }
+				else
+					checksSnapshot = terminalChecks(prUrl, checks.scope, ledger, persist)
+				end
+			end
 			persist()
 			local body = runReporter(
 				reporterAgent,
@@ -1012,16 +1526,24 @@ function M.new(config: Config): Instance
 				config.workingDir,
 				buildReporterPrompt(prUrl, ledger, status, prose, passes)
 			)
-			local posted = statusLine(status, ledger) .. "\n\n" .. body
+			local posted = statusLine(status, ledger, checksSnapshot) .. "\n\n" .. body
 			postReport(prUrl, posted)
-			return { status = status, verdict = verdictText, ledger = ledger, report = posted }
+			return {
+				status = status,
+				verdict = verdictText,
+				ledger = ledger,
+				report = posted,
+				checks = checksSnapshot,
+			}
 		end
 
 		-- The review-pass primitive shared by both operations: prompt with a
 		-- caller-supplied header (the loop's `[pr-review iteration N of M]`,
 		-- the lone pass's `[pr-review pass]`) → work session → typed judge →
 		-- applyFindings → persist. Returns the pass's verdict prose, the
-		-- outcome status implied by the open blocking count, and the
+		-- outcome status implied by the judge's cleanliness (no open
+		-- blocking review findings; check findings are excluded — the
+		-- consult owns them), and the
 		-- still-open work session — the loop issues its fix turn in the same
 		-- session; a lone pass closes it.
 		local function reviewPass(params: {
@@ -1053,15 +1575,46 @@ function M.new(config: Config): Instance
 			applyFindings(ledger, findings)
 			ledger.lastReviewedSha = reviewedSha
 			persist()
-			local status: OutcomeStatus = if hasOpenBlocking(ledger) then "non-converged" else "converged"
+			-- The pass's judge-cleanliness: no open blocking REVIEW findings.
+			-- Check findings (open from a consult) don't count here — the
+			-- gate consult decides them at the loop's convergence exit.
+			local status: OutcomeStatus = if openBlockingReviewCount(ledger) > 0 then "non-converged" else "converged"
 			return verdict, status, session
 		end
 
-		return {
-			persist = persist,
-			finish = finish,
-			reviewPass = reviewPass,
-		}
+		local op: Operation
+		if checks ~= nil then
+			local scope: CheckScope = checks.scope
+			local budgetMs: number = checks.pollBudgetMs
+			local intervalMs: number = checks.pollIntervalMs
+			op = {
+				persist = persist,
+				finish = finish,
+				reviewPass = reviewPass,
+				gateConsult = function(): ChecksRead
+					local read = gateConsult(prUrl, scope, budgetMs, intervalMs, ledger, persist)
+					lastGateRead = read
+					pushedAfterConsult = false
+					return read
+				end,
+				snapshotConsult = function(): ChecksRead
+					local read = snapshotConsult(prUrl, scope, ledger, persist)
+					lastGateRead = read
+					pushedAfterConsult = false
+					return read
+				end,
+				notePush = function()
+					pushedAfterConsult = true
+				end,
+			}
+		else
+			op = {
+				persist = persist,
+				finish = finish,
+				reviewPass = reviewPass,
+			}
+		end
+		return op
 	end
 
 	local instance: Instance = {
@@ -1101,11 +1654,37 @@ function M.new(config: Config): Instance
 				ptah.log(`pr-review: dry run — fixes are not pushed to {prUrl}`)
 			end
 
+			-- A local copy so the analyzer can narrow nil away (a captured
+			-- upvalue cannot be narrowed across the closure boundary).
+			local gateScope: CheckScope? = checksScope
 			local ledger, commentId, discovery = openLedger(prUrl)
-			local ctx = operation(prUrl, ledger, commentId)
+			local ctx = operation(
+				prUrl,
+				ledger,
+				commentId,
+				if gateScope ~= nil
+					then {
+						scope = gateScope,
+						pollBudgetMs = checksPollBudgetMs,
+						pollIntervalMs = checksPollIntervalMs,
+					}
+					else nil
+			)
+
+			-- The loop's outcome always carries `checks` (`off` when the
+			-- gate is unconfigured); `review`'s outcome leaves it nil.
+			local function finishLoop(status: OutcomeStatus, verdictText: string, prose: string?, passes: number): Outcome
+				local outcome = ctx.finish(status, verdictText, prose, passes)
+				outcome.checks = if outcome.checks ~= nil then outcome.checks else { state = "off", failing = {}, pending = {} }
+				return outcome
+			end
 
 			-- The head SHA after a push is the fix's commit; stamp it on the
 			-- open blocking findings the fix targeted (dry-run pushes nothing).
+			-- A push moves the head: the open blocking findings include any
+			-- check findings (they are stamped like any open blocker), and a
+			-- consult read taken before the push no longer describes the
+			-- terminal state.
 			local function recordFixCommit()
 				if push == nil then
 					return
@@ -1116,6 +1695,9 @@ function M.new(config: Config): Instance
 						finding.fixCommit = sha
 					end
 				end
+				if ctx.notePush ~= nil then
+					ctx.notePush()
+				end
 				ctx.persist()
 			end
 
@@ -1124,30 +1706,70 @@ function M.new(config: Config): Instance
 			-- 0.
 			local iteration = 0
 
+			-- One batched resume fix turn over all open blocking findings
+			-- (review and check alike) in a fresh session, followed by
+			-- commit-and-push (gated by dry-run) and the fix-commit stamping.
+			local function resumeFixTurn()
+				local header = `[pr-review iteration {iteration + 1} of {maxIterations}]\n`
+				local session: Session = work:session({ id = `pr-review:{iteration}`, cwd = config.workingDir })
+				sessionConfig.apply(session, config.sessionConfig)
+				session:prompt(buildFixPrompt(prUrl, ledger, header))
+				if push ~= nil then
+					session:prompt(header .. push)
+				end
+				recordFixCommit()
+				session:close()
+				iteration += 1
+			end
+
 			-- Resume fast paths: an existing ledger with open blocking
 			-- findings drives a fix turn; a clean ledger at the current head
-			-- converges immediately.
+			-- consults the gate and converges on green.
 			if not discovery then
+				if hasOpenBlocking(ledger) then
+					-- Snapshot consult (no wait): a check a human fixed out of
+					-- band closes before the turn runs, and a red check files
+					-- its finding so the turn batches check findings with the
+					-- review findings. Pending files nothing — the turn
+					-- proceeds without it.
+					if ctx.snapshotConsult ~= nil then
+						ctx.snapshotConsult()
+					end
+				end
 				if hasOpenBlocking(ledger) then
 					if iteration >= maxIterations - 1 then
 						-- Resumed ledger already at the cap: no review pass runs,
 						-- so the report is rendered from the ledger alone.
-						return ctx.finish("non-converged", "", nil, 0)
+						return finishLoop("non-converged", "", nil, 0)
 					end
-					local header = `[pr-review iteration {iteration + 1} of {maxIterations}]\n`
-					local session: Session = work:session({ id = `pr-review:{iteration}`, cwd = config.workingDir })
-					sessionConfig.apply(session, config.sessionConfig)
-					session:prompt(buildFixPrompt(prUrl, ledger, header))
-					if push ~= nil then
-						session:prompt(header .. push)
-					end
-					recordFixCommit()
-					session:close()
-					iteration += 1
+					resumeFixTurn()
 				elseif ledger.lastReviewedSha == fetchHeadSha(prUrl) then
-					-- Clean ledger at the current head: no work session runs; the
-					-- report goes straight to the reporter (no review prose).
-					return ctx.finish("converged", "", nil, 0)
+					if ctx.gateConsult == nil then
+						-- Clean ledger at the current head, gate off: no work
+						-- session runs; the report goes straight to the
+						-- reporter (no review prose).
+						return finishLoop("converged", "", nil, 0)
+					end
+					-- Clean ledger at head, gate on: the gate consult first
+					-- (poll within the budget). Green converges with no
+					-- session; pending at budget exhaustion ends non-converged,
+					-- named; red files the check findings and issues the fix
+					-- turn directly. Green or pending read at a head that moved
+					-- mid-consult falls through to the main loop's delta pass
+					-- at the actual head.
+					local read = ctx.gateConsult()
+					if read.sha == ledger.lastReviewedSha and read.state == "green" then
+						return finishLoop("converged", "", nil, 0)
+					end
+					if read.sha == ledger.lastReviewedSha and read.state == "pending" then
+						return finishLoop("non-converged", "", nil, 0)
+					end
+					if read.state == "red" then
+						if iteration >= maxIterations - 1 then
+							return finishLoop("non-converged", "", nil, 0)
+						end
+						resumeFixTurn()
+					end
 				end
 			end
 
@@ -1155,7 +1777,7 @@ function M.new(config: Config): Instance
 			local verdict = ""
 			while iteration < maxIterations do
 				local header = `[pr-review iteration {iteration + 1} of {maxIterations}]\n`
-				local passVerdict, status, session = ctx.reviewPass({
+				local passVerdict, passStatus, session = ctx.reviewPass({
 					isDiscovery = isDiscovery,
 					header = header,
 					workSessionId = `pr-review:{iteration}`,
@@ -1164,16 +1786,39 @@ function M.new(config: Config): Instance
 				verdict = passVerdict
 				isDiscovery = false
 
+				local status = passStatus
+				local pendingChecks = false
+				if status == "converged" and ctx.gateConsult ~= nil then
+					-- Judge-clean pass, gate on: checks join the convergence
+					-- decision. The gate consult polls within the budget:
+					-- green converges; red files check findings and falls
+					-- through to the fix-turn/cap logic below; pending at
+					-- budget exhaustion ends non-converged, named.
+					local read = ctx.gateConsult()
+					if read.state == "red" then
+						status = "non-converged"
+					elseif read.state == "pending" then
+						pendingChecks = true
+					end
+				end
+
+				if pendingChecks then
+					session:close()
+					return finishLoop("non-converged", verdict, verdict, iteration + 1)
+				end
+
 				if status == "converged" then
 					session:close()
-					return ctx.finish("converged", verdict, verdict, iteration + 1)
+					return finishLoop("converged", verdict, verdict, iteration + 1)
 				end
 
 				-- The cap forbids a fix on the final unit: end non-converged
-				-- rather than push a fix no review will follow.
+				-- rather than push a fix no review will follow. A red check on
+				-- the final unit ends here too — non-converged, the check
+				-- finding open, no fix without a following pass.
 				if iteration >= maxIterations - 1 then
 					session:close()
-					return ctx.finish("non-converged", verdict, verdict, iteration + 1)
+					return finishLoop("non-converged", verdict, verdict, iteration + 1)
 				end
 
 				-- Batched fix turn: all open blocking findings, by root cause,
@@ -1189,7 +1834,7 @@ function M.new(config: Config): Instance
 				session:close()
 				iteration += 1
 			end
-			return ctx.finish("non-converged", verdict, if verdict ~= "" then verdict else nil, iteration)
+			return finishLoop("non-converged", verdict, if verdict ~= "" then verdict else nil, iteration)
 		end,
 	}
 	return instance
