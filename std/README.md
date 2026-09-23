@@ -22,7 +22,14 @@ repo. See `../README.md` for the library contract and consumption model.
   prune, and a locked stale occupant raises (never unlocked or
   removed); an explicit relative `parent`
   resolves from the selected repository root and provision returns
-  git's canonical physical absolute path. Worktrees default under
+  git's canonical physical absolute path. `liveOccupant` is the
+  introspection export: it reports the path of the registered worktree
+  currently holding a branch when that directory exists, and nil when
+  no registration holds the branch or the only registration is stale
+  (stale stays provision's prune-self-heal business) — live-only,
+  stale-nil, no side effects (no prune, no creation, no removal, no
+  fetch): it reports, never removes, and provision's live-occupant
+  raise is unchanged. Worktrees default under
   `<repo-root>/.ptah/worktree/` (pass `parent` to place them elsewhere,
   e.g. outside any checkout); `git` on PATH is a declared environment
   requirement, and so is git-ignoring `.ptah/worktree/` — without the

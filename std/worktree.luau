@@ -42,6 +42,14 @@
 -- expected post-crash outcome, and it happens after a possibly-converged
 -- loop, so the caller logs it rather than failing the run.
 --
+-- `liveOccupant` is the one introspection export: it reports the path
+-- of the registered worktree currently holding a branch when that
+-- worktree's directory exists, and nil when no registration holds the
+-- branch or the only registration is stale (a stale registration stays
+-- provision's prune-self-heal business). No policy, no side effects —
+-- it reports; it never removes — and provision's live-occupant raise
+-- is unchanged by it.
+--
 -- Environment: `git` on PATH (declared, not bundled), like the GitHub
 -- transport's `gh`, and a git-ignored `.ptah/worktree/` under the
 -- repository root — without the ignore rule every default worktree is
@@ -388,6 +396,40 @@ local function provision(options: ProvisionOptions): Worktree
 	return { path = path, branch = branch, ref = options.ref }
 end
 
+-- The occupant introspection options: the branch to look up, and the
+-- repository to resolve it against (defaulting to the invocation
+-- directory's repository, exactly like provision's `repo`).
+export type LiveOccupantOptions = {
+	-- The branch whose live occupant is reported.
+	branch: string,
+	-- Repository to operate on. Defaults to the invocation directory's
+	-- repository (`git rev-parse --show-toplevel`).
+	repo: string?,
+}
+
+-- Report the live occupant of `branch`: the path of the registered
+-- worktree currently attached to it, when that worktree's directory
+-- exists. Nil when no registration holds the branch, and nil when the
+-- only registration is stale (its directory is gone — stale state
+-- remains provision's prune-self-heal business). Pure introspection:
+-- no prune, no creation, no removal, no fetch, and no branch
+-- inspection beyond the inventory provision already parses. It carries
+-- no policy — it reports; it never removes — and provision's
+-- live-occupant raise is unchanged by it.
+local function liveOccupant(options: LiveOccupantOptions): string?
+	-- The analyzer already requires this; the guard keeps an untyped
+	-- caller's nil from becoming a confusing git failure.
+	if (options.branch :: string?) == nil then
+		error("worktree: branch is required")
+	end
+	local root = repoRoot(options.repo)
+	local occupant = branchOccupant(registeredWorktrees(root), options.branch)
+	if occupant ~= nil and pathExists(occupant) then
+		return occupant
+	end
+	return nil
+end
+
 -- The repository a worktree belongs to, discovered from the worktree
 -- itself so teardown needs only `path`. Nil falls back to the invocation
 -- directory.
@@ -422,4 +464,5 @@ end
 return {
 	provision = provision,
 	teardown = teardown,
+	liveOccupant = liveOccupant,
 }

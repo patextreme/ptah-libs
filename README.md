@@ -121,6 +121,7 @@ path only, non-converged-as-hand-off), and the environment requirements.
   | ptah_libs | Minimum ptah |
   | --- | --- |
   | 0.1.0 | ptah 0.1.0 (session-config support and `session:sessionId()`) |
+  | 0.3.0 | ptah 0.1.0 (no new ptah surface required) |
 
 - **Offline test coverage lives upstream — and is pending.** The library's
   offline suite (mock agent, no network, no real agent) is maintained in the
