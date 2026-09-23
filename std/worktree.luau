@@ -14,7 +14,10 @@
 -- raises, never unlocked or removed), fast-forwards-or-fails an
 -- existing branch against its remote counterpart, and never resets or
 -- renames; `teardown` refuses a dirty worktree by default and never
--- touches branches (unpushed commits survive on the local branch).
+-- touches branches (unpushed commits survive on the local branch), and
+-- refuses the worktree that contains the process's own working
+-- directory — removing it would orphan the run's cwd, and every later
+-- git call from the deleted directory fails.
 -- One path identity rules a provision run: an explicit relative
 -- parent resolves from the selected repository root, the target
 -- collapses to its canonical physical absolute path before any lookup
@@ -38,9 +41,10 @@
 --
 -- Failure is asymmetric on purpose: `provision` raises carrying git's
 -- stderr (a failed provision means the run cannot proceed, pcall-able);
--- `teardown` returns its outcome as data — a dirty refusal is the
--- expected post-crash outcome, and it happens after a possibly-converged
--- loop, so the caller logs it rather than failing the run.
+-- `teardown` returns its outcome as data — a dirty refusal and the
+-- self-directory refusal (the worktree containing the process's cwd)
+-- are the expected refusals, and they happen after a possibly-converged
+-- loop, so the caller logs them rather than failing the run.
 --
 -- `liveOccupant` is the one introspection export: it reports the path
 -- of the registered worktree currently holding a branch when that
@@ -104,7 +108,8 @@ export type TeardownOptions = {
 
 export type TeardownOutcome = {
 	ok: boolean,
-	-- git's message when the removal failed (nil on success).
+	-- git's message when the removal failed, or the mechanism's own
+	-- refusal reason (nil on success).
 	stderr: string?,
 }
 
@@ -441,10 +446,48 @@ local function worktreeRepo(path: string): string?
 	return parentOf(result.stdout)
 end
 
--- Tear a provisioned worktree down: refuse-dirty by default, remove and
--- prune otherwise, never a branch. Outcome as data — never raises.
+-- Whether `candidate` is `dir` itself or somewhere inside it — plain
+-- byte comparison over physical absolute paths (no pattern matching, so
+-- path bytes are never read as patterns), with the `/` boundary so
+-- `/a/b` does not count as inside `/a/bc`. Directional on purpose: a
+-- target *under* the working directory (the canonical worktree under
+-- the shared checkout) is not "inside" the working directory and is
+-- removable; only a target containing the working directory orphans
+-- the run.
+local function isInsideOrEqual(candidate: string, dir: string): boolean
+	if candidate == dir then
+		return true
+	end
+	if #candidate <= #dir then
+		return false
+	end
+	return string.sub(candidate, 1, #dir) == dir and string.sub(candidate, #dir + 1, #dir + 1) == "/"
+end
+
+-- Tear a provisioned worktree down: refuse-dirty by default, refuse the
+-- worktree containing the process's own working directory always, remove
+-- and prune otherwise, never a branch. Outcome as data — never raises.
 local function teardown(worktree: { path: string }, options: TeardownOptions?): TeardownOutcome
 	local opts: TeardownOptions = if options ~= nil then options else {}
+	-- The self-directory refusal precedes every git call and ignores
+	-- `force`: force discards uncommitted changes, it never licenses
+	-- deleting the directory the run is executing from — a removal git
+	-- happily performs even with the process standing in it, after which
+	-- every later git call from the deleted cwd dies on "Unable to read
+	-- current working directory" and poisons the rest of the run. Both
+	-- sides collapse to physical absolute paths first, so a symlink alias
+	-- on either side cannot split the comparison; a target that no longer
+	-- exists skips the guard and lets git's own refusal answer.
+	local workdir = physicalDir(".")
+	if workdir ~= nil then
+		local physicalTarget = physicalDir(worktree.path)
+		if physicalTarget ~= nil and isInsideOrEqual(workdir, physicalTarget) then
+			return {
+				ok = false,
+				stderr = `worktree: refusing to remove {worktree.path}: it contains this run's working directory ({workdir}); run the teardown from outside the worktree`,
+			}
+		end
+	end
 	local repo = worktreeRepo(worktree.path)
 	local args = { "worktree", "remove" }
 	if opts.force == true then

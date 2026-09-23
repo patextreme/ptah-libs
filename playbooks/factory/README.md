@@ -161,6 +161,13 @@ re-queue. A locked worktree fails the same way (git refuses the
 removal; unlocking is never the factory's act). The step relocates a
 checkout; it never discards work.
 
+Launching the factory from inside your prep worktree fails the issue
+too, and leaves it untouched: the mechanism refuses to remove the
+worktree the run itself is executing from — deleting it would orphan
+the run's working directory and break every later git call. Launch the
+factory from the shared checkout (or any directory outside the
+worktree) and re-queue.
+
 The same relocation covers a re-queued interrupted run: the earlier
 run's canonical worktree is a live occupant too, so a clean one is
 removed and the issue restarts fresh from `origin/<base>`, while a

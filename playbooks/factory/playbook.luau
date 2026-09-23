@@ -517,10 +517,12 @@ function M.new(config: Config): Instance
 		-- work: the branch survives teardown by contract and provision
 		-- re-attaches it at the canonical worktree under its
 		-- fast-forward-or-fail rule, commits preserved. A refusal (a dirty
-		-- or locked occupant) fails the issue naming the path and the
-		-- remedy, with the worktree and its contents untouched; the claim
-		-- marker stays. With `removeOccupantWorktree = false` this step is
-		-- skipped and provision's occupant raise is the behavior again.
+		-- or locked occupant, or one containing this run's own working
+		-- directory — the mechanism never removes the directory the factory
+		-- executes from) fails the issue naming the path and the remedy,
+		-- with the worktree and its contents untouched; the claim marker
+		-- stays. With `removeOccupantWorktree = false` this step is skipped
+		-- and provision's occupant raise is the behavior again.
 		if removeOccupantWorktree then
 			local occupant = worktree.liveOccupant({ branch = branch })
 			if occupant ~= nil then

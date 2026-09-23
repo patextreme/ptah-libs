@@ -14,7 +14,9 @@ repo. See `../README.md` for the library contract and consumption model.
 - `worktree.luau` — git worktree lifecycle over `ptah.exec`: `provision`
   (adopt as-is / prune a stale registration and re-create / resolve a
   branch held by another registration / fast-forward-or-fail / create;
-  never reset) and `teardown` (refuse-dirty, never branches); a branch
+  never reset) and `teardown` (refuse-dirty, never branches; a worktree
+  containing the run's own working directory is refused outright —
+  removing it would orphan the run's cwd); a branch
   already checked out in a different registered worktree is resolved
   before any attach — a live occupant raises naming both the occupant
   and the target path (the occupant is left untouched), a stale

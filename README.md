@@ -338,7 +338,10 @@ git's stderr — the run cannot proceed without a worktree.
 `teardown` **refuses a dirty worktree** by default (`force` discards the
 changes), then removes and prunes. It never touches branches: unpushed
 commits survive on the local branch, and branch deletion is deliberately
-outside the API. See the `playbooks` spec's *Worktree lifecycle*
+outside the API. It also refuses — `force` or not — to remove the
+worktree that contains the run's own working directory: deleting it
+would orphan the run's cwd, and every later git call from the deleted
+directory fails. See the `playbooks` spec's *Worktree lifecycle*
 requirement for the full contract.
 
 ## Session config

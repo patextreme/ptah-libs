@@ -331,7 +331,13 @@ proceed.
 and an optional `force`. It SHALL refuse a dirty worktree by default,
 remove and prune otherwise, and SHALL NOT touch branches: unpushed
 commits survive on the local branch, and no branch-deletion operation
-exists in the mechanism. Teardown SHALL return its outcome as data (`ok`,
+exists in the mechanism. It SHALL also refuse — regardless of `force`
+— the worktree that contains the calling process's working directory:
+removing it would orphan the run's own cwd, and every later git call
+from the deleted directory would fail; the comparison runs on physical
+absolute paths so a symlink alias on either side cannot split it, and
+a target nested *under* the working directory is untouched by the
+refusal. Teardown SHALL return its outcome as data (`ok`,
 and `stderr` on failure) rather than raising — a dirty refusal after a
 converged loop is something the caller logs, not a failed run.
 
@@ -464,6 +470,11 @@ converged loop is something the caller logs, not a failed run.
 
 - **WHEN** teardown succeeds on a worktree whose branch has unpushed commits
 - **THEN** the local branch and its commits remain — teardown never deletes branches
+
+#### Scenario: The worktree holding the run's own directory is refused
+
+- **WHEN** teardown runs on the worktree that contains the calling process's working directory (the process was launched from inside it), with or without `force`
+- **THEN** the worktree and its contents are left in place and the outcome is a failed one carrying the refusal reason — the mechanism never removes the directory the run executes from
 
 ### Requirement: Worktree occupant introspection
 
@@ -1481,6 +1492,11 @@ and stay claimed.
 
 - **WHEN** the live occupant of the issue branch contains uncommitted or untracked changes
 - **THEN** the issue fails naming the occupant path and the commit/stash/remove remedy; the worktree and its contents are untouched, and the claim marker stays
+
+#### Scenario: Occupant holding the factory's own directory fails untouched
+
+- **WHEN** the factory is launched from inside the live occupant of `issue-<n>` and claims the issue
+- **THEN** the relocation's teardown refuses — the mechanism never removes the directory the run executes from — and the issue fails naming the occupant path and the remedy, with the worktree, its contents, and the claim marker untouched
 
 #### Scenario: Unoccupied branch behaves as before
 
