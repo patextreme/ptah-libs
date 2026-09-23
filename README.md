@@ -121,6 +121,7 @@ path only, non-converged-as-hand-off), and the environment requirements.
   | ptah_libs | Minimum ptah |
   | --- | --- |
   | 0.1.0 | ptah 0.1.0 (session-config support and `session:sessionId()`) |
+  | 0.3.0 | ptah 0.1.0 (no new ptah surface required) |
 
 - **Offline test coverage lives upstream — and is pending.** The library's
   offline suite (mock agent, no network, no real agent) is maintained in the
@@ -337,7 +338,10 @@ git's stderr — the run cannot proceed without a worktree.
 `teardown` **refuses a dirty worktree** by default (`force` discards the
 changes), then removes and prunes. It never touches branches: unpushed
 commits survive on the local branch, and branch deletion is deliberately
-outside the API. See the `playbooks` spec's *Worktree lifecycle*
+outside the API. It also refuses — `force` or not — to remove the
+worktree that contains the run's own working directory: deleting it
+would orphan the run's cwd, and every later git call from the deleted
+directory fails. See the `playbooks` spec's *Worktree lifecycle*
 requirement for the full contract.
 
 ## Session config

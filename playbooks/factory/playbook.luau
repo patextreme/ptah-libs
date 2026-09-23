@@ -115,6 +115,14 @@ export type Config = {
 	resolveChangeAttempts: number?,
 	-- Bound on the PR hand-off (default 3): exhaustion fails the issue.
 	openPullRequestAttempts: number?,
+	-- Whether the factory may relocate a live occupant of the issue branch
+	-- before provisioning it (default `true`): the occupant worktree — the
+	-- operator's prep worktree for this very issue, or a manual checkout —
+	-- is torn down with default (refuse-dirty) options so the claim can
+	-- re-attach the surviving branch at the canonical worktree. A teardown
+	-- refusal fails the issue naming the path and the remedy; `false`
+	-- restores provision's occupant raise.
+	removeOccupantWorktree: boolean?,
 }
 
 export type PrReviewed = {
@@ -345,6 +353,11 @@ function M.new(config: Config): Instance
 	local openPrAttempts = if config.openPullRequestAttempts ~= nil
 		then config.openPullRequestAttempts
 		else DEFAULT_OPEN_PR_ATTEMPTS
+	-- Default on: claim-marker serialization means the only possible
+	-- occupants of `issue-<n>` are the operator's own artifacts, so the
+	-- documented prep hand-off just works; `false` keeps provision's
+	-- occupant raise as the tripwire.
+	local removeOccupantWorktree = config.removeOccupantWorktree ~= false
 
 	-- The issue playbook is agent-free: one instance per factory instance.
 	local issueOps = issuePlaybook.new({
@@ -495,6 +508,32 @@ function M.new(config: Config): Instance
 	local function workIssue(brief: issuePlaybook.Brief): Outcome
 		local number = brief.number
 		local branch = `issue-{number}`
+
+		-- The prep hand-off: the only possible live occupant of `issue-<n>`
+		-- is the operator's own artifact (the prep worktree for this very
+		-- issue, or a manual checkout — claim-marker serialization keeps
+		-- rival owners out), so before provisioning the factory relocates
+		-- it. Teardown with default (refuse-dirty) options never discards
+		-- work: the branch survives teardown by contract and provision
+		-- re-attaches it at the canonical worktree under its
+		-- fast-forward-or-fail rule, commits preserved. A refusal (a dirty
+		-- or locked occupant, or one containing this run's own working
+		-- directory — the mechanism never removes the directory the factory
+		-- executes from) fails the issue naming the path and the remedy,
+		-- with the worktree and its contents untouched; the claim marker
+		-- stays. With `removeOccupantWorktree = false` this step is skipped
+		-- and provision's occupant raise is the behavior again.
+		if removeOccupantWorktree then
+			local occupant = worktree.liveOccupant({ branch = branch })
+			if occupant ~= nil then
+				ptah.log(`{ERROR_PREFIX}: issue #{number} relocating the worktree holding branch {branch} from {occupant}`)
+				local removed = worktree.teardown({ path = occupant })
+				if not removed.ok then
+					error(`{ERROR_PREFIX}: issue #{number}: could not relocate the worktree holding branch {branch} at {occupant}: {removed.stderr} — commit, stash, or remove it by hand, then re-queue the issue`)
+				end
+			end
+		end
+
 		local wt = worktree.provision({
 			name = branch,
 			ref = `origin/{base}`,

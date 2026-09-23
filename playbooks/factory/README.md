@@ -15,7 +15,9 @@ converges consumers; a consumer shim shrinks to config.
   when the required `queueLabel` or `base` is missing.
 - `factory:issueToPR(number?)` — one issue, end to end: claim (the given
   number only if eligible — an ineligible one raises with the reason — or
-  the **oldest eligible** in scan mode), provision its worktree on the
+  the **oldest eligible** in scan mode), relocate any live occupant of
+  `issue-<n>` unless `removeOccupantWorktree` is `false` (see [The prep
+  hand-off](#the-prep-hand-off)), provision its worktree on the
   fixed branch `issue-<n>` off `origin/<base>` (fetched; adopt/resume
   semantics), resolve the issue to an existing openspec change (a typed
   hand-off bounded by `resolveChangeAttempts`; an empty submitted name
@@ -58,6 +60,7 @@ local factory = libs.factory.new({
 	maxReviewIterations = 10,            -- optional (default 10) → the review loop's cap
 	resolveChangeAttempts = 3,           -- optional (default 3) → the resolution hand-off bound
 	openPullRequestAttempts = 3,         -- optional (default 3) → the delivery hand-off bound
+	removeOccupantWorktree = true,       -- optional (default true): relocate a live occupant of issue-<n> before provisioning
 })
 ```
 
@@ -69,6 +72,14 @@ local factory = libs.factory.new({
   they were the same branch and never split.
 - **The worktree branch is the fixed `issue-<n>`.** Three repos, zero
   variance; there is no naming callback (ADR 0006).
+- **`removeOccupantWorktree` (default `true`).** Before provisioning,
+  the factory relocates any live occupant of `issue-<n>` — the
+  operator's prep worktree for this very issue, or a manual checkout —
+  by tearing it down with default (refuse-dirty) options; the branch
+  survives teardown by contract and provision re-attaches it at the
+  canonical worktree. A teardown refusal fails the issue naming the
+  path and the remedy. `false` skips the step: an occupied branch
+  fails through provision's occupant raise, today's behavior.
 - **Prompt fragments travel as data.** `conventions` rides at its
   declared injection point in the direct-edit prompt; `prContract` rides
   in the delivery prompt. The skeletons are library-owned and their
@@ -122,6 +133,50 @@ and cannot drift:
 Session ids keep the shim shapes — `factory-resolve:<n>`,
 `factory-direct:<n>`, `factory-pr:<n>` — and every log line keeps the
 `factory:` prefix for grep compatibility.
+
+## The prep hand-off
+
+Working an issue by hand before letting the factory finish it — the
+contract that makes a re-queued issue just work:
+
+1. Prepare the change in your own worktree on the issue's branch, e.g.
+   `git worktree add worktrees/issue-37 origin/main -b issue-37` (any
+   path works — the factory keys on the branch registration, not the
+   path), and implement the change there.
+2. Commit and push `issue-<n>`.
+3. Re-queue the issue by deleting the claim marker (`claimedLabel`).
+
+When the factory next claims the issue, it finds your worktree holding
+`issue-<n>`, tears it down with default (refuse-dirty) options — the
+relocation log names the path — and provisions its canonical worktree
+on the surviving branch: your commits are preserved (provision's
+fast-forward-or-fail rule keeps divergence loud), and the issue
+proceeds end to end.
+
+If your worktree is dirty (uncommitted or untracked changes), the
+issue **fails** instead, naming the occupant path and the remedy —
+commit, stash, or remove it by hand — with the worktree and its
+contents untouched and the claim marker kept; clean it up and
+re-queue. A locked worktree fails the same way (git refuses the
+removal; unlocking is never the factory's act). The step relocates a
+checkout; it never discards work.
+
+Launching the factory from inside your prep worktree fails the issue
+too, and leaves it untouched: the mechanism refuses to remove the
+worktree the run itself is executing from — deleting it would orphan
+the run's working directory and break every later git call. Launch the
+factory from the shared checkout (or any directory outside the
+worktree) and re-queue.
+
+The same relocation covers a re-queued interrupted run: the earlier
+run's canonical worktree is a live occupant too, so a clean one is
+removed and the issue restarts fresh from `origin/<base>`, while a
+dirty one fails with the remedy instead of resuming in place.
+
+`removeOccupantWorktree = false` turns the relocation off: an occupied
+branch fails through provision's occupant raise, and a branch with no
+live registration provisions exactly as without the step (a stale
+registration stays provision's self-heal).
 
 ## Label vocabulary
 
