@@ -1564,14 +1564,19 @@ pull request targets `base`), the free-text `conventions` and
 `prContract` prompt fragments injected into the direct-edit and delivery
 prompts respectively, the convergence and bounded-retry caps
 (`maxReviewIterations`, `resolveChangeAttempts`,
-`openPullRequestAttempts`), and the optional `removeOccupantWorktree`
-(default `true` — whether the factory may relocate a live occupant of the
-issue branch before provisioning; `false` restores provision's occupant
-raise). The worktree branch for each issue SHALL be
-the fixed `issue-<n>`. openspec SHALL be mandatory in v1: each claimed
-issue is resolved to an existing openspec change — driven through groom →
-implement → verify — or implemented as a direct edit when no change
-applies. The factory SHALL expose no dry-run pass-through.
+`openPullRequestAttempts`), the review-fix loop's check gate and reviewer
+instruction (`checks` and `reviewInstruction`, forwarded verbatim into
+the internally constructed pr playbook — nil `checks` keeps the gate off
+and nil `reviewInstruction` selects the pr playbook's built-in default
+persona; the factory adds no default, no rename, and no validation of
+its own), and the optional `removeOccupantWorktree` (default `true` —
+whether the factory may relocate a live occupant of the issue branch
+before provisioning; `false` restores provision's occupant raise). The
+worktree branch for each issue SHALL be the fixed `issue-<n>`. openspec
+SHALL be mandatory in v1: each claimed issue is resolved to an existing
+openspec change — driven through groom → implement → verify — or
+implemented as a direct edit when no change applies. The factory SHALL
+expose no dry-run pass-through.
 
 #### Scenario: The consumer shim shrinks to config
 
@@ -1597,6 +1602,21 @@ applies. The factory SHALL expose no dry-run pass-through.
 
 - **WHEN** `factory.new` is called with `removeOccupantWorktree = false`
 - **THEN** the factory performs no relocation and an occupied issue branch fails through provision's occupant raise, today's behavior
+
+#### Scenario: The check gate is configurable through the factory
+
+- **WHEN** a consumer configures `checks` on the factory's config
+- **THEN** the factory-driven review-fix loop consults check state at the PR head at every convergence decision exactly as when the pr playbook is configured directly — red checks become playbook-owned ledger findings the fix turn resolves, pending checks poll within the budget and end the loop non-converged at exhaustion, and a converged report implies green checks
+
+#### Scenario: The reviewer instruction is configurable through the factory
+
+- **WHEN** a consumer configures `reviewInstruction` on the factory's config
+- **THEN** the composed review loop's review sessions run under that persona in place of the built-in default
+
+#### Scenario: Unset review fields change nothing
+
+- **WHEN** `factory.new` is called without `checks` or without `reviewInstruction`
+- **THEN** the composed review-fix loop behaves exactly as before this change — the gate is off (no check state is read) and the built-in default persona is used
 
 ### Requirement: Factory issue-to-PR operation
 

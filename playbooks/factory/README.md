@@ -58,6 +58,8 @@ local factory = libs.factory.new({
 	conventions = "...",                 -- optional free-text fragment → the direct-edit prompt
 	prContract = "...",                  -- optional free-text fragment → the delivery prompt
 	maxReviewIterations = 10,            -- optional (default 10) → the review loop's cap
+	checks = { scope = "all" },          -- optional → the review loop's check gate (pr playbook semantics); nil = gate off
+	reviewInstruction = "...",           -- optional → the review persona (pr playbook persona layer); nil = built-in default
 	resolveChangeAttempts = 3,           -- optional (default 3) → the resolution hand-off bound
 	openPullRequestAttempts = 3,         -- optional (default 3) → the delivery hand-off bound
 	removeOccupantWorktree = true,       -- optional (default true): relocate a live occupant of issue-<n> before provisioning
@@ -91,6 +93,23 @@ local factory = libs.factory.new({
   Conventional Commits). Repo law — signing, commit trailers, lint
   allowlists, CI contracts — belongs only in fragments; a fragment may
   point the agent at the repo's CI contract instead of restating it.
+- **Review knobs forward verbatim.** `checks` and `reviewInstruction` are
+  the pr playbook's own fields, forwarded verbatim into the internally
+  constructed review loop — same names, same types, and no factory-side
+  defaults, validation, or reshaping. Nil `checks` keeps the gate off (no
+  check state is read — the pr playbook's opt-in semantics) and nil
+  `reviewInstruction` selects the pr playbook's built-in default persona.
+  The gate's semantics and budget arithmetic — scopes (`"required"` /
+  `"all"`), pending-poll budget and spacing, red checks as ledger findings
+  the fix turn resolves, worst-case wall clock `maxIterations ×
+  pollBudgetMs` — are documented in the pr playbook, not restated here
+  ([the check gate](../pr/README.md#the-check-gate-loop-only-off-by-default),
+  [the instruction contract](../pr/README.md#the-instruction-contract-three-layers)).
+  One consequence of the no-re-validation rule: the pr playbook is
+  constructed per issue, so a malformed `checks` table fails the first
+  issue with the pr playbook's `pr-review:` error — loud and immediate,
+  and every subsequent issue fails identically — rather than raising at
+  `factory.new`.
 - **No playbook instances in config.** The factory builds its issue,
   openspec, and pr playbook instances internally — one issue instance per
   factory, one openspec/pr pair per issue worktree.
@@ -100,9 +119,15 @@ local factory = libs.factory.new({
 Outcomes are data, discriminated on `status`:
 
 - `pr-reviewed` — PR opened, review loop converged. Carries the issue
-  `number`, `prUrl`, and the review `verdict`.
+  `number`, `prUrl`, and the review `verdict`. With the check gate
+  configured (`checks`), a converged report implies green checks at the
+  reviewed head — the loop cannot end converged on red or still-pending
+  in-scope checks.
 - `pr-non-converged` — PR opened, review loop reached its cap with open
-  blocking findings. Carries `number`, `prUrl`, `verdict`. A **completed
+  blocking findings. Carries `number`, `prUrl`, `verdict`. With the gate
+  configured, red checks surface as blocking check findings (same as any
+  other blocking finding) and checks still pending at the poll budget's
+  exhaustion end the loop non-converged. A **completed
   hand-off to the issue's human reviewer** — the worktree is torn down
   and the issue waits for its human at merge time; it is never recorded
   as a failure.
