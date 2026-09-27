@@ -605,6 +605,22 @@ prompt. A scope that matches no tasks SHALL end the pass with a stated
 dead-end rather than the agent substituting a different subset, and the
 escalation path SHALL surface it (an ask when a provider serves it; an
 operation error otherwise).
+
+When implement runs without a task scope, the work prompt SHALL carry a
+component-owned delegation clause directing the agent to delegate
+implementation by default, one subagent per **task group** — the tasks
+sharing a top-level number in the tasks file (e.g. `1.1`, `1.2`, `1.3` to
+one subagent; `2.1`, `2.2`, `2.3`, `2.4` to another) — passing each
+subagent its group's tasks and the context it needs and having it return a
+concise report carrying the tasks done, the files changed, and the
+verification evidence. The agent SHALL implement directly only when
+delegation would cost more than it saves. The clause SHALL NOT be
+configurable away, and the orchestrating work session SHALL remain the
+sole writer of the tasks file and SHALL carry each task group's outcome
+into its final report, because the loop's judge judges only the
+orchestrator's prose. Subagent support SHALL NOT be a hard environment
+requirement: an agent unable to spawn subagents SHALL implement directly,
+and delegation SHALL remain an optimization rather than an obligation.
 groom and verify SHALL remain whole-change operations.
 
 #### Scenario: Verify converges and archives
@@ -665,12 +681,22 @@ groom and verify SHALL remain whole-change operations.
 #### Scenario: Scopeless implement is unchanged
 
 - **WHEN** implement runs without a task scope
-- **THEN** the prompts, judge acceptance, and log lines are identical to the behavior before task scopes existed, with completion judged against all tasks of the change
+- **THEN** completion is still judged against all tasks of the change, the convergence loop and escalation path are untouched, and the operation's returned text is unchanged; only the work prompt gains the delegation clause, so every other scopeless mechanic is identical to the behavior before delegation existed
+
+#### Scenario: Scopeless implement carries the delegation clause
+
+- **WHEN** implement runs without a task scope
+- **THEN** the work prompt carries the component-owned delegation clause — directing the agent to delegate implementation by default, one subagent per task group, and to implement directly only when delegation would cost more than it saves — while the orchestrating work session remains the sole writer of the tasks file
 
 #### Scenario: Unresolvable scope dead-ends
 
 - **WHEN** implement runs with a task scope that matches no tasks of the change
 - **THEN** the agent ends the pass stating that the scope matches no tasks without implementing a substitute subset, and the dead-end surfaces through the escalation path (an ask when a provider serves it; the operation fails otherwise)
+
+#### Scenario: Scoped implement is unchanged by delegation
+
+- **WHEN** implement runs with a task scope
+- **THEN** the work prompt, judge acceptance, and log lines do not carry the delegation clause and are identical to the behavior before delegation existed
 
 #### Scenario: Work sessions receive session config
 

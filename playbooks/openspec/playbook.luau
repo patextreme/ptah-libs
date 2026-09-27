@@ -62,6 +62,14 @@ local DEFAULT_MAX_ITERATIONS = 10
 -- confirmation-seeking never pays because the loop re-judges every pass.
 local AUTONOMY_CLAUSE = "Make judgment calls autonomously, note each in your output as 'judgment call: …', the loop re-judges every pass, and never wait for confirmation."
 
+-- The component-owned delegation clause, appended to the scopeless implement
+-- prompt only (a task scope already narrows the job). Directive by default,
+-- not obligation: an agent without subagent support keeps implementing
+-- directly, and the orchestrating session stays the sole writer of the tasks
+-- file because the loop's judge sees only its prose. Component-owned like
+-- the autonomy clause, so it cannot be configured away.
+local DELEGATION_CLAUSE = "Delegate implementation by default: one subagent per task group — the tasks sharing a top-level number in the tasks file (1.1, 1.2, 1.3 to one subagent; 2.1, 2.2, 2.3, 2.4 to another) — passing each subagent its group's tasks and the context they need, and having it return a concise report of the tasks done, the files changed, and the verification evidence. Run groups one at a time unless they are clearly independent. Check each group's result before marking its tasks complete, keep writing the tasks file yourself (subagents never edit it), and carry each group's outcome into your final report — the loop's judge sees only your prose. Delegation is an optimization, not an obligation: implement directly whenever delegation would cost more than it saves, including whenever you cannot spawn subagents."
+
 local M = {}
 
 function M.new(config: Config): Instance
@@ -171,7 +179,8 @@ function M.new(config: Config): Instance
 			-- the scope must ride inside the predicate). A scope that
 			-- matches no tasks dead-ends through the prompt's "state it,
 			-- don't guess" clause into the pause -> human-escalation path
-			-- below. Nil scope keeps today's strings byte-for-byte.
+			-- below. Nil scope keeps the base string byte-for-byte and
+			-- appends the delegation clause (scoped prompts stay clause-free).
 			local prompt: string
 			local accepted: string
 			if scope ~= nil then
@@ -183,6 +192,8 @@ function M.new(config: Config): Instance
 				ptah.log(`openspec: implementing change {change}`)
 				prompt =
 					`Implement the pending tasks of the openspec change named {change} using the openspec-apply-change skill. End each pass either with all tasks implemented or paused with a stated reason, as the skill defines those states.`
+					.. "\n\n"
+					.. DELEGATION_CLAUSE
 				accepted = "All tasks of the change are implemented"
 			end
 			local text = drive("opsx-implement", prompt, {

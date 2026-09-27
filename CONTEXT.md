@@ -86,6 +86,17 @@ Local config: content the library places, never logic the library calls.
 _Avoid_: prompt override (the prompt skeleton is never replaced), custom
 prompt
 
+**Task group**:
+The tasks of a change sharing one top-level number in its tasks file
+(`1.1, 1.2, 1.3` are one task group; `2.1, 2.2, 2.3, 2.4` are the
+next) — the implementation-delegation unit of a scopeless implement
+run: one subagent per task group, receiving its group's tasks and
+context and returning a concise report the orchestrating session
+carries into its own. A task scope may name a task group
+(`"task group 1"`) but neither creates nor redefines one.
+_Avoid_: task batch (implies ad hoc grouping, not the top-level-number
+unit), section (names the file's heading, not the delegation unit)
+
 **Task scope**:
 The per-call description of which tasks an implement run is responsible
 for. Completion — and the convergence loop's acceptance — is judged
