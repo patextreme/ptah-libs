@@ -87,12 +87,27 @@ Per-call data is a method argument:
   cap otherwise.
 - `ops:implement(change)` — drive task execution
   (`openspec-apply-change`) until all tasks of the change are
-  implemented. Each pass ends either complete or paused with a stated
-  reason, as the skill defines those states: a pause the agent can
-  resolve itself (e.g. updating the change's artifacts) is resolved and
-  the loop continues; a pause that rests on an operator-owned decision
-  escalates — an answered ask resumes the loop, otherwise the operation
-  fails (see
+  implemented. A scopeless run's work prompt carries a component-owned
+  delegation clause: the work agent delegates implementation by
+  default, one subagent per **task group** — the tasks sharing a
+  top-level number in the tasks file (`1.1, 1.2, 1.3` to one subagent;
+  `2.1, 2.2, 2.3, 2.4` to another) — passing each subagent its group's
+  tasks and the context they need and having it return a concise
+  report (tasks done, files changed, verification evidence). Groups
+  run one at a time unless they are clearly independent. The
+  orchestrating work session checks each group's result before marking
+  its tasks complete, remains the sole writer of the tasks file, and
+  carries each group's outcome into its final report — the loop's
+  judge judges only the orchestrator's prose. Delegation is an
+  optimization, not an obligation: the agent implements directly when
+  delegation would cost more than it saves, and **subagent support is
+  not an environment requirement** — an agent that cannot spawn
+  subagents keeps implementing directly. Each pass ends either
+  complete or paused with a stated reason, as the skill defines those
+  states: a pause the agent can resolve itself (e.g. updating the
+  change's artifacts) is resolved and the loop continues; a pause that
+  rests on an operator-owned decision escalates — an answered ask
+  resumes the loop, otherwise the operation fails (see
   [Escalation](#escalation-ask-when-served-fail-otherwise)).
 - `ops:implement(change, scope)` — same loop with a task scope: free
   text describing the subset of the change's tasks the run is
@@ -104,8 +119,13 @@ Per-call data is a method argument:
   agent must not substitute a different subset), which surfaces
   through the human-escalation path — an ask when a provider serves
   it; the operation error otherwise
-  ([Escalation](#escalation-ask-when-served-fail-otherwise)). Calling
-  without a scope keeps the whole-change behavior byte-for-byte.
+  ([Escalation](#escalation-ask-when-served-fail-otherwise)). Scoped
+  runs are unchanged by delegation: their work prompt, judge
+  acceptance, and log lines carry no delegation clause. Calling
+  without a scope keeps the whole-change behavior — completion judged
+  against all tasks of the change — and differs from the behavior
+  before delegation existed only by the work prompt's delegation
+  clause.
 - `ops:verify(change)` — converge verification
   (`openspec-verify-change`) until it reports no critical findings or
   warnings, then sync and archive the change in the same operation.
